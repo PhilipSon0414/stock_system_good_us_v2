@@ -54,12 +54,48 @@ _NASDAQ_GROWTH = [
 ]
 
 
+# 학습 전용 확장 유니버스 — 스캔 대상은 아니지만 학습 데이터 다양성을 높인다.
+# (더 많은 종목·섹터의 급등 패턴을 학습해 일반화 성능 개선)
+_TRAIN_EXTRA = [
+    # 산업/운송
+    'UNP','CSX','NSC','FDX','UPS','DAL','UAL','LUV','GM','F',
+    'CMI','PCAR','URI','PWR','FAST','GWW','IR','ROK','DOV','AME',
+    'CARR','OTIS','JCI','TT','WM','RSG','LHX','HWM','AXON','HEI',
+    # 에너지
+    'COP','EOG','SLB','HAL','OXY','DVN','FANG','MPC','PSX','VLO',
+    'KMI','WMB','LNG','BKR',
+    # 소재
+    'FCX','NEM','NUE','STLD','DOW','DD','APD','SHW','ECL','ALB',
+    'CF','VMC','MLM',
+    # 금융/거래소
+    'BX','KKR','APO','TROW','STT','BK','TFC','MTB','FITB','KEY',
+    'RF','HBAN','CFG','ALL','TRV','PGR','CB','MET','PRU','AFL',
+    'AIG','ICE','CME','NDAQ','MCO','MSCI',
+    # 헬스케어
+    'PFE','REGN','ZTS','ISRG','SYK','BSX','MDT','EW','DXCM','IDXX',
+    'IQV','RMD','HCA','PODD','WAT',
+    # 테크/반도체
+    'ANET','CDNS','SNPS','ADI','NXPI','MCHP','TER','ENTG','MPWR','FTNT',
+    'TEAM','WDAY','ADSK','TTD','SHOP','SE','MELI','UBER','ABNB','DASH',
+    'ROKU','SPOT','PINS','SNAP','TWLO','U','PATH','AI','SOUN',
+    # 통신/미디어/소비재
+    'DIS','CMCSA','T','VZ','TMUS','CHWY','DKNG','CZR','LVS','RCL',
+    'CCL','NCLH','DPZ','CMG','YUM','QSR','HSY','CL','KMB','EL',
+    'ULTA','LULU','DECK','CROX','BURL','DG','DLTR','FIVE',
+    # 크립토 채굴 추가
+    'HIVE','BITF','IREN',
+]
+
+
 def get_ticker_list(market: str = 'ALL') -> list[str]:
-    """market: 'SP500' | 'GROWTH' | 'ALL'"""
+    """market: 'SP500' | 'GROWTH' | 'ALL' | 'TRAIN'
+    'TRAIN'은 학습 전용 확장 목록(스캔 유니버스 + 확장 종목)."""
     if market == 'SP500':
         base = _SP500_CORE
     elif market == 'GROWTH':
         base = _NASDAQ_GROWTH
+    elif market == 'TRAIN':
+        base = _SP500_CORE + _NASDAQ_GROWTH + _TRAIN_EXTRA
     else:
         base = _SP500_CORE + _NASDAQ_GROWTH
     return list(dict.fromkeys(base))

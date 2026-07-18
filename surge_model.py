@@ -41,7 +41,8 @@ from sklearn.isotonic import IsotonicRegression
 
 from config import (SURGE_TARGET, SURGE_HORIZON, HISTORY_PERIOD, MIN_PRICE,
                     MIN_AVG_VOLUME, MIN_TRAIN_ROWS, CALIB_FRACTION,
-                    TARGET_PRECISION, MIN_PROB_FLOOR)
+                    TARGET_PRECISION, MIN_PROB_FLOOR,
+                    RECENT_DAYS, RECENT_WEIGHT)
 from indicators import add_all, validate_features, MODEL_FEATURES, TREND_FEATURES
 from data_fetcher import get_ohlcv, FetchLog
 from universe import get_ticker_list
@@ -77,7 +78,8 @@ def make_labels(df: pd.DataFrame) -> pd.Series:
 
 def build_dataset(tickers: list[str] | None = None,
                   verbose: bool = True) -> pd.DataFrame:
-    tickers = tickers or get_ticker_list('ALL')
+    # 학습은 스캔 유니버스보다 넓은 'TRAIN' 목록 사용 (일반화 성능 향상)
+    tickers = tickers or get_ticker_list('TRAIN')
     log = FetchLog()
     frames = []
 
@@ -115,9 +117,17 @@ def build_dataset(tickers: list[str] | None = None,
 
 # ── 학습 + 보정 + 임계값 ─────────────────────────────────────────────────────
 
+def _recency_weights(part: pd.DataFrame) -> np.ndarray:
+    """최근 RECENT_DAYS 이내 샘플에 RECENT_WEIGHT 가중치 —
+    현재 장세(지난 1년)의 급등 패턴을 더 강하게 학습."""
+    dates  = pd.to_datetime(part['date'].values)
+    cutoff = dates.max() - pd.Timedelta(days=RECENT_DAYS)
+    return np.where(dates >= cutoff, RECENT_WEIGHT, 1.0)
+
+
 def _fit_calibrated(train: pd.DataFrame) -> dict:
     """시간순 앞 (1-CALIB_FRACTION)으로 학습, 뒤 CALIB_FRACTION으로
-    isotonic 보정 + 임계값 선택."""
+    isotonic 보정 + 임계값 선택. 최근 1년 샘플에 가중치 부여."""
     feat_cols = feature_columns()
     n_cal = max(200, int(len(train) * CALIB_FRACTION))
     fit_part, cal_part = train.iloc[:-n_cal], train.iloc[-n_cal:]
@@ -126,7 +136,9 @@ def _fit_calibrated(train: pd.DataFrame) -> dict:
         max_iter=300, learning_rate=0.05, max_depth=6,
         min_samples_leaf=30, class_weight='balanced', random_state=42,
     )
-    model.fit(fit_part[feat_cols].values, fit_part['label'].values.astype(int))
+    model.fit(fit_part[feat_cols].values,
+              fit_part['label'].values.astype(int),
+              sample_weight=_recency_weights(fit_part))
 
     p_raw = model.predict_proba(cal_part[feat_cols].values)[:, 1]
     y_cal = cal_part['label'].values.astype(int)
