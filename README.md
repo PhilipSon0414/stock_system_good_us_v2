@@ -29,6 +29,19 @@ python3 summary_email.py
 이메일: `email_sender.py` 최초 실행 시 생성되는 `email_config.json`에
 Gmail 앱 비밀번호를 넣고 `"enabled": true` 로 변경.
 
+### 데이터 수집 이중 경로 (프록시/샌드박스 환경 지원)
+
+yfinance는 내부적으로 `curl_cffi`(브라우저 TLS 위장)를 사용하는데, TLS를
+재종단하는 보안 프록시 환경(Claude Code 원격 샌드박스, 일부 회사망)에서는
+이 핸드셰이크가 차단됩니다. `data_fetcher.py`는 yfinance 실패를 감지하면
+자동으로 **Yahoo Finance API 직접 호출**(표준 `requests` 기반)로 전환합니다:
+
+- OHLCV: `/v8/finance/chart` (adjclose로 수정주가 반영)
+- 재무/공매도/기관: `/v10/finance/quoteSummary` (cookie+crumb 인증)
+
+폴백 사용 시 리포트에 `ℹ yfinance 차단 감지 → Yahoo API 직접 호출` 로
+표시됩니다. 별도 설정 없이 두 환경 모두에서 동작합니다.
+
 ## v1 리뷰 지적사항 → v2 반영 내역
 
 | # | v1 문제 | v2 해결 |

@@ -148,13 +148,17 @@ def calc_trade_params(ob: dict, price: float, high52w: float | None,
 
     entry = result['entry']
 
-    # 목표가: 위쪽 약세OB 저항 직전 → 없으면 52주 신고가 → 없으면 +10%
-    bear_above = sorted([b for b in ob.get('bear', []) if b['Low'] > entry],
+    # 목표가: 위쪽 약세OB 저항 직전 → 52주 신고가 → 기본 +10~15%
+    #  - 진입가 대비 +3% 미만의 저항은 목표로 무의미 → 제외
+    #  - 52주 신고가가 +35% 이상 위면 (폭락 후 회복 중) 10일 내 목표로
+    #    비현실적 → 기본 목표 사용
+    bear_above = sorted([b for b in ob.get('bear', [])
+                         if b['Low'] > entry * 1.03],
                         key=lambda x: x['Low'])
     if bear_above:
         result['target']      = round(bear_above[0]['Low'] * 0.99, 2)
         result['target_desc'] = f'약세OB 저항(${bear_above[0]["Low"]:.2f}) 직전'
-    elif high52w and high52w > entry * 1.05:
+    elif high52w and entry * 1.05 < high52w <= entry * 1.35:
         result['target']      = round(high52w * 0.99, 2)
         result['target_desc'] = f'52주 신고가(${high52w:.2f}) 직전'
     else:
