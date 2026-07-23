@@ -46,17 +46,27 @@ def add_all(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def validate_features(df: pd.DataFrame, features: list[str] | None = None) -> None:
+def validate_features(df: pd.DataFrame, features: list[str] | None = None,
+                      optional: set[str] | None = None) -> None:
     """모델 피처가 실제로 존재하고 전체 NaN이 아닌지 검증. 실패 시 즉시 에러.
-    (v1은 피처 7개가 조용히 NaN이었다 — 다시는 조용히 죽지 않게 한다.)"""
+    (v1은 피처 7개가 조용히 NaN이었다 — 다시는 조용히 죽지 않게 한다.)
+
+    optional: 전체 NaN을 허용하는 컬럼 집합 — 외부 소스라 일시 수집 실패가
+    있을 수 있는 매크로 피처용. 존재 자체는 여전히 필수이고, 전체 NaN이면
+    에러 대신 경고를 출력한다 (조용히 삼키지 않되 스캔은 막지 않음)."""
     features = features or MODEL_FEATURES
+    optional = optional or set()
     missing  = [c for c in features if c not in df.columns]
     if missing:
         raise ValueError(f'지표 컬럼 누락: {missing}')
     all_nan = [c for c in features
                if df[c].isna().all()]
-    if all_nan:
-        raise ValueError(f'지표 컬럼이 전부 NaN: {all_nan}')
+    hard = [c for c in all_nan if c not in optional]
+    if hard:
+        raise ValueError(f'지표 컬럼이 전부 NaN: {hard}')
+    soft = [c for c in all_nan if c in optional]
+    if soft:
+        print(f'  ⚠ 선택 피처 전부 NaN (수집 실패 — 모델이 결측 처리): {soft}')
 
 
 # ── 기본 속성 ─────────────────────────────────────────────────────────────────

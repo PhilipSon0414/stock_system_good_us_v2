@@ -36,6 +36,7 @@ from order_block import get_order_blocks, calc_trade_params
 from scorer import score_technical
 from surge_model import load_model, predict_prob
 from email_sender import send_report
+import macro
 import tracker
 
 HERE = Path(__file__).parent
@@ -149,6 +150,10 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
     else:
         L.append('  ⚠ 급등 확률 모델 미학습 — 합산은 기술점수 단독입니다.')
         L.append('    `python3 surge_model.py train` 실행 후 확률이 반영됩니다.')
+    # 매크로 국면 (달러/하이일드/구리 — 수집 실패 시 명시)
+    regime = macro.regime_line()
+    L.append(regime if regime is not None
+             else '  ⚠ 매크로 지표 수집 실패 — 국면 요약 생략 (모델은 결측 처리)')
     L += log.summary_lines()
     L.append('')
 

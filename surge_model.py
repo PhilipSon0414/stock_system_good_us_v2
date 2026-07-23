@@ -42,10 +42,11 @@ from sklearn.isotonic import IsotonicRegression
 from config import (SURGE_TARGET, SURGE_HORIZON, HISTORY_PERIOD, MIN_PRICE,
                     MIN_AVG_VOLUME, MIN_TRAIN_ROWS, CALIB_FRACTION,
                     TARGET_PRECISION, MIN_PROB_FLOOR,
-                    RECENT_DAYS, RECENT_WEIGHT)
+                    RECENT_DAYS, RECENT_WEIGHT, MACRO_IN_MODEL)
 from indicators import add_all, validate_features, MODEL_FEATURES, TREND_FEATURES
 from data_fetcher import get_ohlcv, FetchLog
 from universe import get_ticker_list
+from macro import add_macro, MACRO_FEATURES
 
 HERE = Path(__file__).parent
 MODEL_PATH = HERE / 'surge_model.pkl'
@@ -55,6 +56,10 @@ def feature_columns() -> list[str]:
     cols = list(MODEL_FEATURES)
     for c in TREND_FEATURES:
         cols += [f'd{c}_1d', f'd{c}_3d', f'd{c}_5d']
+    # 매크로 선행지표 — A/B 결과 기본 제외 (config.MACRO_IN_MODEL 주석 참조).
+    # 데이터셋에는 항상 포함해 A/B 재검증이 가능하게 유지한다.
+    if MACRO_IN_MODEL:
+        cols += MACRO_FEATURES
     return cols
 
 
@@ -89,6 +94,7 @@ def build_dataset(tickers: list[str] | None = None,
             continue
         df = add_all(raw)
         df = add_trend_deltas(df)
+        df = add_macro(df)
         df['label']  = make_labels(df)
         df['ticker'] = t
         df['date']   = df.index
@@ -97,7 +103,10 @@ def build_dataset(tickers: list[str] | None = None,
         mask = (df['Close'] >= MIN_PRICE) & (df['VolMA'] >= MIN_AVG_VOLUME)
         df = df[mask & df['label'].notna() & df['VolRatio'].notna()]
         if len(df):
-            frames.append(df[feature_columns() + ['label', 'ticker', 'date']])
+            # 매크로 컬럼은 학습 사용 여부(MACRO_IN_MODEL)와 무관하게 데이터셋에
+            # 항상 보관 — 피처 부분집합 A/B 재검증이 가능하도록.
+            keep = list(dict.fromkeys(feature_columns() + MACRO_FEATURES))
+            frames.append(df[keep + ['label', 'ticker', 'date']])
 
         if verbose and (i % 20 == 0 or i == len(tickers)):
             n = sum(len(f) for f in frames)
@@ -111,7 +120,7 @@ def build_dataset(tickers: list[str] | None = None,
     if not frames:
         raise RuntimeError('데이터 구축 실패: 수집된 종목이 없습니다.')
     data = pd.concat(frames, ignore_index=True)
-    validate_features(data, feature_columns())
+    validate_features(data, feature_columns(), optional=set(MACRO_FEATURES))
     return data.sort_values('date').reset_index(drop=True)
 
 
@@ -125,10 +134,12 @@ def _recency_weights(part: pd.DataFrame) -> np.ndarray:
     return np.where(dates >= cutoff, RECENT_WEIGHT, 1.0)
 
 
-def _fit_calibrated(train: pd.DataFrame) -> dict:
+def _fit_calibrated(train: pd.DataFrame,
+                    feat_cols: list[str] | None = None) -> dict:
     """시간순 앞 (1-CALIB_FRACTION)으로 학습, 뒤 CALIB_FRACTION으로
-    isotonic 보정 + 임계값 선택. 최근 1년 샘플에 가중치 부여."""
-    feat_cols = feature_columns()
+    isotonic 보정 + 임계값 선택. 최근 1년 샘플에 가중치 부여.
+    feat_cols: 피처 부분집합 지정 (매크로 포함/제외 A/B 비교용)."""
+    feat_cols = feat_cols or feature_columns()
     n_cal = max(200, int(len(train) * CALIB_FRACTION))
     fit_part, cal_part = train.iloc[:-n_cal], train.iloc[-n_cal:]
 
@@ -162,7 +173,8 @@ def _fit_calibrated(train: pd.DataFrame) -> dict:
             'threshold': threshold, 'base_rate': float(train['label'].mean())}
 
 
-def walk_forward_backtest(data: pd.DataFrame, n_folds: int = 3) -> None:
+def walk_forward_backtest(data: pd.DataFrame, n_folds: int = 3,
+                          feat_cols: list[str] | None = None) -> list[dict]:
     print('\n' + '═' * 68)
     print('  Walk-Forward 백테스트 (+10%/10일 이진 분류, 퍼지 갭 적용)')
     print('  ⚠ 유니버스가 현재 생존 종목 목록이므로 생존 편향이 있습니다.')
@@ -172,6 +184,7 @@ def walk_forward_backtest(data: pd.DataFrame, n_folds: int = 3) -> None:
     dates = np.sort(data['date'].unique())
     fold_edges = [int(len(dates) * f) for f in (0.5, 0.65, 0.8, 0.95)]
 
+    fold_stats = []
     for k in range(n_folds):
         train_end  = dates[fold_edges[k]]
         test_start = dates[min(fold_edges[k] + SURGE_HORIZON, len(dates) - 1)]
@@ -182,7 +195,7 @@ def walk_forward_backtest(data: pd.DataFrame, n_folds: int = 3) -> None:
         if len(train) < MIN_TRAIN_ROWS or len(test) < 200:
             continue
 
-        fit = _fit_calibrated(train)
+        fit = _fit_calibrated(train, feat_cols)
         p_raw = fit['model'].predict_proba(test[fit['feat_cols']].values)[:, 1]
         p_cal = fit['iso'].predict(p_raw)
         y = test['label'].values.astype(int)
@@ -202,6 +215,11 @@ def walk_forward_backtest(data: pd.DataFrame, n_folds: int = 3) -> None:
               f'  lift {prec/base:.2f}x' if picked.sum() else
               f'    임계값 {fit["threshold"]:.2f} 이상 픽 없음')
         print(f'    상위 10% 확률 구간 정밀도: {prec_td:.1%}  lift {prec_td/base:.2f}x')
+        fold_stats.append({'fold': k + 1, 'base': base,
+                           'n_picked': int(picked.sum()),
+                           'prec_thr': float(prec) if picked.sum() else None,
+                           'prec_top_decile': float(prec_td)})
+    return fold_stats
 
 
 def train_and_save(data: pd.DataFrame) -> dict:
@@ -234,7 +252,9 @@ def predict_prob(df: pd.DataFrame, loaded: dict | None = None) -> dict | None:
     if loaded is None:
         return None
     df = add_trend_deltas(df.copy())
-    validate_features(df, loaded['feat_cols'])
+    if any(c in MACRO_FEATURES for c in loaded['feat_cols']):
+        df = add_macro(df)
+    validate_features(df, loaded['feat_cols'], optional=set(MACRO_FEATURES))
     x = df[loaded['feat_cols']].iloc[[-1]].values
     p_raw = loaded['model'].predict_proba(x)[0, 1]
     p_cal = float(loaded['iso'].predict([p_raw])[0])
