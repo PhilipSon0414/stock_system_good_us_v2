@@ -1,0 +1,25 @@
+{
+  "updated_at": "2026-08-05T21:39:59.842889",
+  "n_evaluated": 18,
+  "overall_hit_rate": 0.111,
+  "buckets": [
+    {
+      "prob_min": 0.25,
+      "prob_max": 0.35,
+      "n": 3,
+      "hit_rate": 0.0
+    },
+    {
+      "prob_min": 0.35,
+      "prob_max": 0.5,
+      "n": 4,
+      "hit_rate": 0.0
+    },
+    {
+      "prob_min": 0.5,
+      "prob_max": 1.01,
+      "n": 11,
+      "hit_rate": 0.182
+    }
+  ]
+}
