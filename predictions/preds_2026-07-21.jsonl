@@ -1,23 +1,23 @@
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "DUOL", "close": 124.70999908447266, "prob": 0.548, "tech_score": 60, "combined": 57}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "RIVN", "close": 17.760000228881836, "prob": 0.499, "tech_score": 57, "combined": 53}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "MARA", "close": 12.25, "prob": 0.575, "tech_score": 46, "combined": 52}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "ESTC", "close": 60.18000030517578, "prob": 0.468, "tech_score": 56, "combined": 51}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "AMD", "close": 544.4299926757812, "prob": 0.575, "tech_score": 40, "combined": 49}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "KVYO", "close": 17.5, "prob": 0.468, "tech_score": 51, "combined": 49}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "MRVL", "close": 207.9600067138672, "prob": 0.548, "tech_score": 42, "combined": 48}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "ACMR", "close": 95.2699966430664, "prob": 0.595, "tech_score": 36, "combined": 48}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "PANW", "close": 342.1499938964844, "prob": 0.404, "tech_score": 53, "combined": 47}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "GTLB", "close": 32.849998474121094, "prob": 0.468, "tech_score": 47, "combined": 47}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "BRZE", "close": 24.280000686645508, "prob": 0.468, "tech_score": 47, "combined": 47}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "S", "close": 18.809999465942383, "prob": 0.373, "tech_score": 50, "combined": 44}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "NCNO", "close": 17.280000686645508, "prob": 0.388, "tech_score": 49, "combined": 44}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "MRNA", "close": 59.65999984741211, "prob": 0.404, "tech_score": 45, "combined": 43}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "CRWD", "close": 191.14999389648438, "prob": 0.468, "tech_score": 40, "combined": 43}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "NET", "close": 272.30999755859375, "prob": 0.468, "tech_score": 40, "combined": 43}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "CLSK", "close": 15.380000114440918, "prob": 0.305, "tech_score": 56, "combined": 43}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "VRNS", "close": 46.18000030517578, "prob": 0.404, "tech_score": 44, "combined": 42}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "BIIB", "close": 203.16000366210938, "prob": 0.166, "tech_score": 66, "combined": 41}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "TOST", "close": 30.3700008392334, "prob": 0.333, "tech_score": 49, "combined": 41}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "ASML", "close": 1801.510009765625, "prob": 0.265, "tech_score": 54, "combined": 40}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "SNOW", "close": 271.7300109863281, "prob": 0.373, "tech_score": 42, "combined": 40}
-{"scan_date": "2026-07-21", "evaluated": false, "ticker": "HOOD", "close": 106.36000061035156, "prob": 0.41, "tech_score": 39, "combined": 40}
+{"scan_date": "2026-07-21", "ticker": "DUOL", "close": 124.70999908447266, "prob": 0.548, "tech_score": 60, "combined": 57, "evals": {"h10": {"max_gain": 0.1531, "end_return": 0.1046, "max_dd": -0.0601, "hit": true}}}
+{"scan_date": "2026-07-21", "ticker": "RIVN", "close": 17.760000228881836, "prob": 0.499, "tech_score": 57, "combined": 53, "evals": {"h10": {"max_gain": 0.0101, "end_return": -0.1126, "max_dd": -0.1498, "hit": false}}}
+{"scan_date": "2026-07-21", "ticker": "MARA", "close": 12.25, "prob": 0.575, "tech_score": 46, "combined": 52, "evals": {"h10": {"max_gain": 0.0743, "end_return": -0.0408, "max_dd": -0.1812, "hit": false}}}
+{"scan_date": "2026-07-21", "ticker": "ESTC", "close": 60.18000030517578, "prob": 0.468, "tech_score": 56, "combined": 51, "evals": {"h10": {"max_gain": 0.1873, "end_return": 0.1808, "max_dd": -0.0685, "hit": true}}}
+{"scan_date": "2026-07-21", "ticker": "AMD", "close": 544.4299926757812, "prob": 0.575, "tech_score": 40, "combined": 49, "evals": {"h10": {"max_gain": 0.0313, "end_return": -0.0475, "max_dd": -0.2211, "hit": false}}}
+{"scan_date": "2026-07-21", "ticker": "KVYO", "close": 17.5, "prob": 0.468, "tech_score": 51, "combined": 49, "evals": {"h10": {"max_gain": 0.1314, "end_return": 0.0914, "max_dd": -0.116, "hit": true}}}
+{"scan_date": "2026-07-21", "ticker": "MRVL", "close": 207.9600067138672, "prob": 0.548, "tech_score": 42, "combined": 48, "evals": {"h10": {"max_gain": 0.0707, "end_return": 0.0511, "max_dd": -0.2167, "hit": false}}}
+{"scan_date": "2026-07-21", "ticker": "ACMR", "close": 95.2699966430664, "prob": 0.595, "tech_score": 36, "combined": 48, "evals": {"h10": {"max_gain": -0.008, "end_return": -0.1339, "max_dd": -0.3331, "hit": false}}}
+{"scan_date": "2026-07-21", "ticker": "PANW", "close": 342.1499938964844, "prob": 0.404, "tech_score": 53, "combined": 47, "evals": {"h10": {"max_gain": 0.0741, "end_return": 0.0707, "max_dd": -0.0982, "hit": false}}}
+{"scan_date": "2026-07-21", "ticker": "GTLB", "close": 32.849998474121094, "prob": 0.468, "tech_score": 47, "combined": 47, "evals": {"h10": {"max_gain": 0.1193, "end_return": 0.1105, "max_dd": -0.0913, "hit": true}}}
+{"scan_date": "2026-07-21", "ticker": "BRZE", "close": 24.280000686645508, "prob": 0.468, "tech_score": 47, "combined": 47, "evals": {"h10": {"max_gain": 0.1058, "end_return": 0.0877, "max_dd": -0.138, "hit": true}}}
+{"scan_date": "2026-07-21", "ticker": "S", "close": 18.809999465942383, "prob": 0.373, "tech_score": 50, "combined": 44, "evals": {"h10": {"max_gain": 0.1194, "end_return": 0.1154, "max_dd": -0.0792, "hit": true}}}
+{"scan_date": "2026-07-21", "ticker": "NCNO", "close": 17.280000686645508, "prob": 0.388, "tech_score": 49, "combined": 44, "evals": {"h10": {"max_gain": 0.1331, "end_return": 0.1285, "max_dd": -0.0666, "hit": true}}}
+{"scan_date": "2026-07-21", "ticker": "MRNA", "close": 59.65999984741211, "prob": 0.404, "tech_score": 45, "combined": 43, "evals": {"h10": {"max_gain": 0.0034, "end_return": -0.0448, "max_dd": -0.1173, "hit": false}}}
+{"scan_date": "2026-07-21", "ticker": "CRWD", "close": 191.14999389648438, "prob": 0.468, "tech_score": 40, "combined": 43, "evals": {"h10": {"max_gain": 0.1124, "end_return": 0.105, "max_dd": -0.089, "hit": true}}}
+{"scan_date": "2026-07-21", "ticker": "NET", "close": 272.30999755859375, "prob": 0.468, "tech_score": 40, "combined": 43, "evals": {"h10": {"max_gain": 0.1155, "end_return": 0.1066, "max_dd": -0.0794, "hit": true}}}
+{"scan_date": "2026-07-21", "ticker": "CLSK", "close": 15.380000114440918, "prob": 0.305, "tech_score": 56, "combined": 43, "evals": {"h10": {"max_gain": 0.0468, "end_return": -0.0787, "max_dd": -0.2308, "hit": false}}}
+{"scan_date": "2026-07-21", "ticker": "VRNS", "close": 46.18000030517578, "prob": 0.404, "tech_score": 44, "combined": 42, "evals": {"h10": {"max_gain": 0.0236, "end_return": -0.0619, "max_dd": -0.1563, "hit": false}}}
+{"scan_date": "2026-07-21", "ticker": "BIIB", "close": 203.16000366210938, "prob": 0.166, "tech_score": 66, "combined": 41, "evals": {"h10": {"max_gain": 0.0759, "end_return": 0.026, "max_dd": -0.0307, "hit": false}}}
+{"scan_date": "2026-07-21", "ticker": "TOST", "close": 30.3700008392334, "prob": 0.333, "tech_score": 49, "combined": 41, "evals": {"h10": {"max_gain": 0.1192, "end_return": 0.1133, "max_dd": -0.0734, "hit": true}}}
+{"scan_date": "2026-07-21", "ticker": "ASML", "close": 1801.510009765625, "prob": 0.265, "tech_score": 54, "combined": 40, "evals": {"h10": {"max_gain": 0.0109, "end_return": -0.0497, "max_dd": -0.1504, "hit": false}}}
+{"scan_date": "2026-07-21", "ticker": "SNOW", "close": 271.7300109863281, "prob": 0.373, "tech_score": 42, "combined": 40, "evals": {"h10": {"max_gain": 0.1825, "end_return": 0.1658, "max_dd": -0.0668, "hit": true}}}
+{"scan_date": "2026-07-21", "ticker": "HOOD", "close": 106.36000061035156, "prob": 0.41, "tech_score": 39, "combined": 40, "evals": {"h10": {"max_gain": 0.0049, "end_return": -0.1208, "max_dd": -0.2132, "hit": false}}}

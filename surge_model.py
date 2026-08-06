@@ -4,8 +4,10 @@
 
 v1의 스테이지 분류 모델을 폐기하고 목표에 직결되는 이진 분류로 재설계:
 
-  라벨:  향후 SURGE_HORIZON(10) 거래일 내 고가가 오늘 종가 대비
-         +SURGE_TARGET(10%) 이상 도달하면 1, 아니면 0.
+  라벨:  향후 SURGE_HORIZON 거래일(config, 현재 20일 = 약 4주) 내 고가가
+         오늘 종가 대비 +SURGE_TARGET(10%) 이상 도달하면 1, 아니면 0.
+         → 기한은 사용자의 스윙 보유 기간(매수 후 2~4주 관찰 후 매도)의
+           상한에 맞춘다. +10% 지정가 매도(GTC)를 걸어두는 운용과 직결.
          → v1은 "하루 +4%"의 8-클래스 전조를 예측했는데, 이는 사용자의
            목표(+10% 급등)와 다른 대상이었다.
 
@@ -164,7 +166,8 @@ def _fit_calibrated(train: pd.DataFrame) -> dict:
 
 def walk_forward_backtest(data: pd.DataFrame, n_folds: int = 3) -> None:
     print('\n' + '═' * 68)
-    print('  Walk-Forward 백테스트 (+10%/10일 이진 분류, 퍼지 갭 적용)')
+    print(f'  Walk-Forward 백테스트 (+{SURGE_TARGET*100:.0f}%/{SURGE_HORIZON}일 '
+          f'이진 분류, 퍼지 갭 적용)')
     print('  ⚠ 유니버스가 현재 생존 종목 목록이므로 생존 편향이 있습니다.')
     print('    절대 수치보다 base rate 대비 향상(lift)으로 해석하세요.')
     print('═' * 68)

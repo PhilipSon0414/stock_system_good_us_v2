@@ -35,6 +35,7 @@ from indicators import add_all
 from order_block import get_order_blocks, calc_trade_params
 from scorer import score_technical
 from surge_model import load_model, predict_prob
+from pattern_miner import load_rules, match_rules
 from email_sender import send_report
 import tracker
 
@@ -168,6 +169,19 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
     L.append(sep2)
     L.append('')
 
+    # 급등 전조 패턴 매치 (확정 투자 방식: 1~2주 내 급등 전조 규칙)
+    pat_hits = [r for r in results if r.get('patterns')]
+    if pat_hits:
+        L.append('  ★ 급등 전조 패턴 매치 (H5=1주 내 / H10=2주 내 +10% 전조 규칙)')
+        L.append(sep2)
+        for r in pat_hits:
+            names = ', '.join(
+                f'{m["name"]}(적중{m["precision_holdout"]:.0%}/lift{m["lift_holdout"]:.1f}x)'
+                for m in r['patterns'])
+            L.append(f'  {r["ticker"]:<7} {r["name"][:22]:<22} {names}')
+        L.append(sep2)
+        L.append('')
+
     # 전체 순위
     L.append(f'  {"순위":<4} {"티커":<7} {"이름":<22} {"가격":>9} {"합산":>4}'
              f' {"기술":>4} {"확률":>5} {"거래량":>6} {"vsMA20":>7}  섹터')
@@ -206,6 +220,10 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
         if ss:
             L.append(f'      {ss}')
         L.append(f'      신호: {" | ".join(r["tags"][:4])}')
+        if r.get('patterns'):
+            L.append('      전조: ' + ', '.join(
+                f'{m["name"]} (홀드아웃 적중 {m["precision_holdout"]:.0%})'
+                for m in r['patterns']))
 
         high52w = None
         if 'High52W' in r['df'].columns:
@@ -266,6 +284,11 @@ def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
     results.sort(key=lambda x: x['combined'], reverse=True)
     results = results[:TOP_N_REPORT]
 
+    # 급등 전조 패턴 매치 (pattern_miner.py가 만든 검증 규칙 — 없으면 생략)
+    pat_rules = load_rules()
+    for r in results:
+        r['patterns'] = match_rules(r['df'], pat_rules) if pat_rules else []
+
     return results, model_payload is not None, log
 
 
@@ -304,6 +327,7 @@ def main(market: str = 'ALL', scan_date: str | None = None):
             'rs_vs_spy': r.get('rs_vs_spy'), 'sector': r.get('sector', ''),
             'short_pct': (r.get('info') or {}).get('short_pct'),
             'elite': any(e['ticker'] == r['ticker'] for e in elite),
+            'patterns': [m['name'] for m in r.get('patterns', [])],
         } for r in results],
     }
     (REPORTS_DIR / f'{fname}.json').write_text(
