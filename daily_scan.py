@@ -25,6 +25,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import pandas as pd
+from pandas.tseries.offsets import BDay
+
 from config import (MIN_PRICE, MIN_AVG_VOLUME, TECH_SCORE_GATE, FINAL_MIN_SCORE,
                     TOP_N_REPORT, TOP_N_DETAIL, W_SCORE, W_MODEL,
                     SURGE_TARGET, SURGE_HORIZON)
@@ -133,10 +136,41 @@ def get_elite_picks(results: list, model_ok: bool) -> list:
     return sorted(elite, key=lambda x: x['combined'], reverse=True)[:10]
 
 
+# ── 실전 코칭 (확정 투자 방식의 운용 규칙을 실제 픽 가격으로 환산) ──────────
+# 체크포인트 확률의 출처: trajectory_miner.py 3y 분석 (신호 32,416건) —
+#   D+3 종가 +5%↑ → 최종 적중 90% / +2~+5% → 52% / -5%↓ → 17%
+#   급등군 75%는 터치 전 낙폭 -5.6% 이내 → 손절 -7%
+#   급등군 80%가 D+7까지 터치 → D+10 시간 손절
+
+def build_coaching(results: list, elite: list, scan_date: str) -> list[dict]:
+    """1순위(엘리트픽 ∩ 전조패턴, 없으면 엘리트픽 상위) 종목의 매매 파라미터."""
+    elite_t = {e['ticker'] for e in elite}
+    prime = [r for r in results if r['ticker'] in elite_t and r.get('patterns')]
+    if not prime:
+        prime = [r for r in results if r['ticker'] in elite_t]
+    d0 = pd.Timestamp(scan_date)
+    dates = {k: (d0 + BDay(n)).strftime('%m/%d')
+             for k, n in [('d3', 3), ('d5', 5), ('d7', 7), ('d10', 10)]}
+    out = []
+    for r in prime[:3]:
+        p = r['price']
+        out.append({
+            'ticker': r['ticker'], 'name': r['name'], 'price': round(p, 2),
+            'target': round(p * 1.10, 2),      # +10% GTC 지정가
+            'stop': round(p * 0.93, 2),        # -7% 손절
+            'd3_strong': round(p * 1.05, 2),   # D+3 +5%↑ → 강홀드 (90%)
+            'd3_hold': round(p * 1.02, 2),     # D+3 +2%↑ → 홀드 (52%)
+            'd3_cut': round(p * 0.95, 2),      # D+3 -5%↓ → 조기 정리 (17%)
+            **dates,
+        })
+    return out
+
+
 # ── 리포트 ───────────────────────────────────────────────────────────────────
 
 def build_report(results: list, elite: list, market: str, model_ok: bool,
-                 gate_note: str, log: FetchLog, scan_date: str) -> str:
+                 gate_note: str, log: FetchLog, scan_date: str,
+                 coaching: list[dict] | None = None) -> str:
     sep, sep2 = '═' * 70, '─' * 70
     L = [sep,
          f'  미국 주식 +{SURGE_TARGET*100:.0f}% 급등 후보 스캔 (v2)',
@@ -180,6 +214,23 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
                 for m in r['patterns'])
             L.append(f'  {r["ticker"]:<7} {r["name"][:22]:<22} {names}')
         L.append(sep2)
+        L.append('')
+
+    # 실전 코칭 (확정 운용 규칙 — 3y 궤적 분석 기반, trajectory_miner.py)
+    if coaching:
+        L.append('  [ 실전 코칭 — 1순위 (엘리트픽 ∩ 전조패턴, 최대 3종목) ]')
+        L.append(sep2)
+        for c in coaching:
+            L.append(f'  ▸ {c["ticker"]} {c["name"][:24]} — 현재가 ${c["price"]:.2f}')
+            L.append(f'      매수 시 동시 주문: 목표 ${c["target"]:.2f} (+10% GTC 지정가)'
+                     f' | 손절 ${c["stop"]:.2f} (-7%)')
+            L.append(f'      D+3({c["d3"]}) 종가 점검: ${c["d3_strong"]:.2f}↑ 강홀드(적중90%)'
+                     f' / ${c["d3_hold"]:.2f}↑ 홀드(52%)'
+                     f' / ${c["d3_cut"]:.2f}↓ 조기 정리(17%)')
+            L.append(f'      D+7({c["d7"]})까지 미터치면 급등확률 80% 소진'
+                     f' → D+10({c["d10"]}) 전후 정리')
+        L.append(sep2)
+        L.append('  ※ 종목당 자금 10~15% 이하, 보유 2주 내 실적 발표 여부 확인.')
         L.append('')
 
     # 전체 순위
@@ -309,7 +360,9 @@ def main(market: str = 'ALL', scan_date: str | None = None):
     gate, gate_note = tracker.recommended_min_prob(default_thr)
 
     elite = get_elite_picks(results, model_ok)
-    report = build_report(results, elite, market, model_ok, gate_note, log, date_str)
+    coaching = build_coaching(results, elite, date_str)
+    report = build_report(results, elite, market, model_ok, gate_note, log,
+                          date_str, coaching)
     print('\n' + report)
 
     # 저장 (텍스트 리포트 + 요약 이메일용 JSON)
@@ -318,6 +371,7 @@ def main(market: str = 'ALL', scan_date: str | None = None):
     scan_json = {
         'scan_date': date_str, 'market': market, 'model_ok': model_ok,
         'gate_note': gate_note,
+        'coaching': coaching,
         'results': [{
             'ticker': r['ticker'], 'name': r['name'], 'price': r['price'],
             'combined': r['combined'], 'tech_score': r['tech_score'],
