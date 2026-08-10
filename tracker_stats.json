@@ -1,38 +1,38 @@
 {
-  "updated_at": "2026-08-06T21:39:57.611293",
+  "updated_at": "2026-08-10T21:43:29.048185",
   "target": 0.1,
   "primary_horizon": 20,
   "horizons": {
     "10": {
-      "n_evaluated": 41,
-      "hit_rate": 0.317,
-      "avg_end_return": 0.0037,
-      "median_end_return": -0.0148,
-      "avg_max_dd": -0.1244,
+      "n_evaluated": 71,
+      "hit_rate": 0.451,
+      "avg_end_return": 0.026,
+      "median_end_return": 0.026,
+      "avg_max_dd": -0.1122,
       "buckets": [
         {
           "prob_min": 0.15,
           "prob_max": 0.25,
-          "n": 1,
-          "hit_rate": 0.0
+          "n": 2,
+          "hit_rate": 0.5
         },
         {
           "prob_min": 0.25,
           "prob_max": 0.35,
-          "n": 6,
-          "hit_rate": 0.167
+          "n": 9,
+          "hit_rate": 0.444
         },
         {
           "prob_min": 0.35,
           "prob_max": 0.5,
-          "n": 18,
-          "hit_rate": 0.5
+          "n": 37,
+          "hit_rate": 0.568
         },
         {
           "prob_min": 0.5,
           "prob_max": 0.65,
-          "n": 16,
-          "hit_rate": 0.188
+          "n": 23,
+          "hit_rate": 0.261
         }
       ]
     }

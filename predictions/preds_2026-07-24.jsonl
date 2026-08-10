@@ -1,11 +1,11 @@
-{"scan_date": "2026-07-24", "ticker": "LCID", "close": 6.300000190734863, "prob": 0.645, "tech_score": 48, "combined": 56, "evals": {}}
-{"scan_date": "2026-07-24", "ticker": "MNDY", "close": 77.43000030517578, "prob": 0.499, "tech_score": 58, "combined": 54, "evals": {}}
-{"scan_date": "2026-07-24", "ticker": "MARA", "close": 12.119999885559082, "prob": 0.575, "tech_score": 46, "combined": 52, "evals": {}}
-{"scan_date": "2026-07-24", "ticker": "S", "close": 18.139999389648438, "prob": 0.41, "tech_score": 58, "combined": 50, "evals": {}}
-{"scan_date": "2026-07-24", "ticker": "SNOW", "close": 268.05999755859375, "prob": 0.373, "tech_score": 60, "combined": 49, "evals": {}}
-{"scan_date": "2026-07-24", "ticker": "WULF", "close": 18.459999084472656, "prob": 0.373, "tech_score": 54, "combined": 46, "evals": {}}
-{"scan_date": "2026-07-24", "ticker": "DUOL", "close": 122.23999786376953, "prob": 0.404, "tech_score": 52, "combined": 46, "evals": {}}
-{"scan_date": "2026-07-24", "ticker": "KLAC", "close": 210.52000427246094, "prob": 0.468, "tech_score": 42, "combined": 44, "evals": {}}
-{"scan_date": "2026-07-24", "ticker": "ETN", "close": 404.07000732421875, "prob": 0.265, "tech_score": 56, "combined": 41, "evals": {}}
-{"scan_date": "2026-07-24", "ticker": "ESTC", "close": 58.68000030517578, "prob": 0.388, "tech_score": 44, "combined": 41, "evals": {}}
-{"scan_date": "2026-07-24", "ticker": "ZS", "close": 142.32000732421875, "prob": 0.404, "tech_score": 40, "combined": 40, "evals": {}}
+{"scan_date": "2026-07-24", "ticker": "LCID", "close": 6.300000190734863, "prob": 0.645, "tech_score": 48, "combined": 56, "evals": {"h10": {"max_gain": 0.3492, "end_return": 0.1175, "max_dd": -0.019, "hit": true}}}
+{"scan_date": "2026-07-24", "ticker": "MNDY", "close": 77.43000030517578, "prob": 0.499, "tech_score": 58, "combined": 54, "evals": {"h10": {"max_gain": 0.2329, "end_return": 0.2028, "max_dd": 0.0138, "hit": true}}}
+{"scan_date": "2026-07-24", "ticker": "MARA", "close": 12.119999885559082, "prob": 0.575, "tech_score": 46, "combined": 52, "evals": {"h10": {"max_gain": 0.0173, "end_return": -0.1675, "max_dd": -0.2005, "hit": false}}}
+{"scan_date": "2026-07-24", "ticker": "S", "close": 18.139999389648438, "prob": 0.41, "tech_score": 58, "combined": 50, "evals": {"h10": {"max_gain": 0.1855, "end_return": 0.1797, "max_dd": -0.0259, "hit": true}}}
+{"scan_date": "2026-07-24", "ticker": "SNOW", "close": 268.05999755859375, "prob": 0.373, "tech_score": 60, "combined": 49, "evals": {"h10": {"max_gain": 0.2363, "end_return": 0.2329, "max_dd": -0.054, "hit": true}}}
+{"scan_date": "2026-07-24", "ticker": "WULF", "close": 18.459999084472656, "prob": 0.373, "tech_score": 54, "combined": 46, "evals": {"h10": {"max_gain": 0.065, "end_return": -0.0748, "max_dd": -0.1977, "hit": false}}}
+{"scan_date": "2026-07-24", "ticker": "DUOL", "close": 122.23999786376953, "prob": 0.404, "tech_score": 52, "combined": 46, "evals": {"h10": {"max_gain": 0.1764, "end_return": 0.0708, "max_dd": -0.0836, "hit": true}}}
+{"scan_date": "2026-07-24", "ticker": "KLAC", "close": 210.52000427246094, "prob": 0.468, "tech_score": 42, "combined": 44, "evals": {"h10": {"max_gain": 0.0166, "end_return": -0.0589, "max_dd": -0.1934, "hit": false}}}
+{"scan_date": "2026-07-24", "ticker": "ETN", "close": 404.07000732421875, "prob": 0.265, "tech_score": 56, "combined": 41, "evals": {"h10": {"max_gain": 0.1301, "end_return": 0.1104, "max_dd": -0.1159, "hit": true}}}
+{"scan_date": "2026-07-24", "ticker": "ESTC", "close": 58.68000030517578, "prob": 0.388, "tech_score": 44, "combined": 41, "evals": {"h10": {"max_gain": 0.2863, "end_return": 0.28, "max_dd": 0.0136, "hit": true}}}
+{"scan_date": "2026-07-24", "ticker": "ZS", "close": 142.32000732421875, "prob": 0.404, "tech_score": 40, "combined": 40, "evals": {"h10": {"max_gain": 0.1929, "end_return": 0.1852, "max_dd": 0.003, "hit": true}}}
