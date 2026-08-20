@@ -1,20 +1,20 @@
-{"scan_date": "2026-08-04", "ticker": "LCID", "close": 7.78000020980835, "prob": 0.597, "tech_score": 62, "combined": 61, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "KVYO", "close": 19.100000381469727, "prob": 0.541, "tech_score": 59, "combined": 57, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "CIFR", "close": 20.3799991607666, "prob": 0.597, "tech_score": 47, "combined": 53, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "DUOL", "close": 137.75, "prob": 0.501, "tech_score": 55, "combined": 53, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "RIVN", "close": 15.760000228881836, "prob": 0.413, "tech_score": 61, "combined": 51, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "FROG", "close": 86.22000122070312, "prob": 0.452, "tech_score": 57, "combined": 51, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "HUT", "close": 101.16000366210938, "prob": 0.583, "tech_score": 41, "combined": 50, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "INTU", "close": 323.6000061035156, "prob": 0.501, "tech_score": 47, "combined": 49, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "PANW", "close": 366.3399963378906, "prob": 0.32, "tech_score": 56, "combined": 44, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "AMD", "close": 518.5800170898438, "prob": 0.508, "tech_score": 36, "combined": 43, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "NOW", "close": 118.13999938964844, "prob": 0.464, "tech_score": 40, "combined": 43, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "OKTA", "close": 147.82000732421875, "prob": 0.371, "tech_score": 48, "combined": 43, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "NET", "close": 301.3299865722656, "prob": 0.371, "tech_score": 49, "combined": 43, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "FIS", "close": 44.2599983215332, "prob": 0.281, "tech_score": 58, "combined": 43, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "AFRM", "close": 78.12000274658203, "prob": 0.361, "tech_score": 48, "combined": 42, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "CRM", "close": 190.99000549316406, "prob": 0.328, "tech_score": 50, "combined": 41, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "ADBE", "close": 257.489990234375, "prob": 0.362, "tech_score": 46, "combined": 41, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "SOFI", "close": 18.700000762939453, "prob": 0.361, "tech_score": 45, "combined": 41, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "SBUX", "close": 104.97000122070312, "prob": 0.171, "tech_score": 63, "combined": 40, "evals": {}}
-{"scan_date": "2026-08-04", "ticker": "DV", "close": 11.930000305175781, "prob": 0.281, "tech_score": 52, "combined": 40, "evals": {}}
+{"scan_date": "2026-08-04", "ticker": "LCID", "close": 7.78000020980835, "prob": 0.597, "tech_score": 62, "combined": 61, "evals": {"h10": {"max_gain": -0.0694, "end_return": -0.2584, "max_dd": -0.2635, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "KVYO", "close": 19.100000381469727, "prob": 0.541, "tech_score": 59, "combined": 57, "evals": {"h10": {"max_gain": 0.034, "end_return": -0.0675, "max_dd": -0.1885, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "CIFR", "close": 20.3799991607666, "prob": 0.597, "tech_score": 47, "combined": 53, "evals": {"h10": {"max_gain": 0.0363, "end_return": -0.2103, "max_dd": -0.2262, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "DUOL", "close": 137.75, "prob": 0.501, "tech_score": 55, "combined": 53, "evals": {"h10": {"max_gain": 0.0661, "end_return": 0.0137, "max_dd": -0.1868, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "RIVN", "close": 15.760000228881836, "prob": 0.413, "tech_score": 61, "combined": 51, "evals": {"h10": {"max_gain": 0.0527, "end_return": -0.0622, "max_dd": -0.0863, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "FROG", "close": 86.22000122070312, "prob": 0.452, "tech_score": 57, "combined": 51, "evals": {"h10": {"max_gain": 0.1421, "end_return": 0.0624, "max_dd": -0.0779, "hit": true}}}
+{"scan_date": "2026-08-04", "ticker": "HUT", "close": 101.16000366210938, "prob": 0.583, "tech_score": 41, "combined": 50, "evals": {"h10": {"max_gain": 0.036, "end_return": -0.2014, "max_dd": -0.2067, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "INTU", "close": 323.6000061035156, "prob": 0.501, "tech_score": 47, "combined": 49, "evals": {"h10": {"max_gain": 0.1187, "end_return": 0.0828, "max_dd": -0.0233, "hit": true}}}
+{"scan_date": "2026-08-04", "ticker": "PANW", "close": 366.3399963378906, "prob": 0.32, "tech_score": 56, "combined": 44, "evals": {"h10": {"max_gain": 0.0888, "end_return": 0.0213, "max_dd": -0.0473, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "AMD", "close": 518.5800170898438, "prob": 0.508, "tech_score": 36, "combined": 43, "evals": {"h10": {"max_gain": -0.0024, "end_return": -0.0659, "max_dd": -0.1068, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "NOW", "close": 118.13999938964844, "prob": 0.464, "tech_score": 40, "combined": 43, "evals": {"h10": {"max_gain": 0.0983, "end_return": 0.0114, "max_dd": -0.0537, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "OKTA", "close": 147.82000732421875, "prob": 0.371, "tech_score": 48, "combined": 43, "evals": {"h10": {"max_gain": 0.058, "end_return": -0.0264, "max_dd": -0.0529, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "NET", "close": 301.3299865722656, "prob": 0.371, "tech_score": 49, "combined": 43, "evals": {"h10": {"max_gain": 0.1025, "end_return": 0.0001, "max_dd": -0.0704, "hit": true}}}
+{"scan_date": "2026-08-04", "ticker": "FIS", "close": 44.2599983215332, "prob": 0.281, "tech_score": 58, "combined": 43, "evals": {"h10": {"max_gain": 0.0043, "end_return": -0.0748, "max_dd": -0.0748, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "AFRM", "close": 78.12000274658203, "prob": 0.361, "tech_score": 48, "combined": 42, "evals": {"h10": {"max_gain": 0.037, "end_return": -0.0584, "max_dd": -0.0847, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "CRM", "close": 190.99000549316406, "prob": 0.328, "tech_score": 50, "combined": 41, "evals": {"h10": {"max_gain": 0.0702, "end_return": 0.027, "max_dd": -0.0418, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "ADBE", "close": 257.489990234375, "prob": 0.362, "tech_score": 46, "combined": 41, "evals": {"h10": {"max_gain": 0.0618, "end_return": 0.0219, "max_dd": -0.0258, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "SOFI", "close": 18.700000762939453, "prob": 0.361, "tech_score": 45, "combined": 41, "evals": {"h10": {"max_gain": 0.0139, "end_return": -0.0556, "max_dd": -0.0567, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "SBUX", "close": 104.97000122070312, "prob": 0.171, "tech_score": 63, "combined": 40, "evals": {"h10": {"max_gain": 0.0468, "end_return": 0.0099, "max_dd": -0.018, "hit": false}}}
+{"scan_date": "2026-08-04", "ticker": "DV", "close": 11.930000305175781, "prob": 0.281, "tech_score": 52, "combined": 40, "evals": {"h10": {"max_gain": 0.1194, "end_return": 0.1123, "max_dd": -0.0205, "hit": true}}}
