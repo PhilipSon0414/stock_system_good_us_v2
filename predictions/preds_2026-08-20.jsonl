@@ -1,26 +1,26 @@
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "KVYO", "close": 18.110000610351562, "prob": 0.65, "tech_score": 57, "combined": 61}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "AVAV", "close": 159.7899932861328, "prob": 0.636, "tech_score": 57, "combined": 60}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "SMCI", "close": 36.5, "prob": 0.636, "tech_score": 51, "combined": 57}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "KTOS", "close": 56.18000030517578, "prob": 0.636, "tech_score": 46, "combined": 55}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "MU", "close": 974.3300170898438, "prob": 0.636, "tech_score": 44, "combined": 54}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "MNDY", "close": 91.30000305175781, "prob": 0.636, "tech_score": 45, "combined": 54}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "LLY", "close": 1244.4000244140625, "prob": 0.44, "tech_score": 60, "combined": 52}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "SOFI", "close": 17.920000076293945, "prob": 0.584, "tech_score": 46, "combined": 52}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "BILL", "close": 47.400001525878906, "prob": 0.492, "tech_score": 53, "combined": 51}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "NOW", "close": 129.75, "prob": 0.52, "tech_score": 44, "combined": 48}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "SNOW", "close": 321.2900085449219, "prob": 0.52, "tech_score": 45, "combined": 48}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "XYZ", "close": 80.08000183105469, "prob": 0.453, "tech_score": 48, "combined": 47}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "MDB", "close": 420.3699951171875, "prob": 0.52, "tech_score": 42, "combined": 47}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "ACN", "close": 181.35000610351562, "prob": 0.52, "tech_score": 40, "combined": 46}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "ADBE", "close": 272.2200012207031, "prob": 0.504, "tech_score": 41, "combined": 46}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "PANW", "close": 349.55999755859375, "prob": 0.44, "tech_score": 48, "combined": 46}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "ABBV", "close": 261.8299865722656, "prob": 0.275, "tech_score": 63, "combined": 45}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "SBUX", "close": 103.98999786376953, "prob": 0.364, "tech_score": 54, "combined": 45}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "PM", "close": 191.52000427246094, "prob": 0.261, "tech_score": 58, "combined": 42}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "DE", "close": 620.9400024414062, "prob": 0.44, "tech_score": 41, "combined": 42}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "EMR", "close": 154.72000122070312, "prob": 0.383, "tech_score": 45, "combined": 42}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "BIIB", "close": 214.35000610351562, "prob": 0.336, "tech_score": 49, "combined": 41}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "BKNG", "close": 209.8699951171875, "prob": 0.414, "tech_score": 41, "combined": 41}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "NVDA", "close": 216.85000610351562, "prob": 0.364, "tech_score": 44, "combined": 40}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "ETN", "close": 415.2900085449219, "prob": 0.364, "tech_score": 44, "combined": 40}
-{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {}, "ticker": "LOW", "close": 217.33999633789062, "prob": 0.383, "tech_score": 42, "combined": 40}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.1549, "end_return": 0.0911, "max_dd": -0.042, "hit": true}}, "ticker": "KVYO", "close": 18.110000610351562, "prob": 0.65, "tech_score": 57, "combined": 61}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.028, "end_return": -0.0787, "max_dd": -0.12, "hit": false}}, "ticker": "AVAV", "close": 159.7899932861328, "prob": 0.636, "tech_score": 57, "combined": 60}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0814, "end_return": 0.0375, "max_dd": -0.066, "hit": false}}, "ticker": "SMCI", "close": 36.5, "prob": 0.636, "tech_score": 51, "combined": 57}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0431, "end_return": -0.1438, "max_dd": -0.1648, "hit": false}}, "ticker": "KTOS", "close": 56.18000030517578, "prob": 0.636, "tech_score": 46, "combined": 55}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.016, "end_return": -0.0166, "max_dd": -0.089, "hit": false}}, "ticker": "MU", "close": 974.3300170898438, "prob": 0.636, "tech_score": 44, "combined": 54}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.1172, "end_return": 0.066, "max_dd": -0.0306, "hit": true}}, "ticker": "MNDY", "close": 91.30000305175781, "prob": 0.636, "tech_score": 45, "combined": 54}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0216, "end_return": -0.0681, "max_dd": -0.0859, "hit": false}}, "ticker": "LLY", "close": 1244.4000244140625, "prob": 0.44, "tech_score": 60, "combined": 52}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0879, "end_return": 0.0329, "max_dd": -0.0558, "hit": false}}, "ticker": "SOFI", "close": 17.920000076293945, "prob": 0.584, "tech_score": 46, "combined": 52}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0736, "end_return": 0.073, "max_dd": -0.0253, "hit": false}}, "ticker": "BILL", "close": 47.400001525878906, "prob": 0.492, "tech_score": 53, "combined": 51}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.153, "end_return": 0.1221, "max_dd": -0.0607, "hit": true}}, "ticker": "NOW", "close": 129.75, "prob": 0.52, "tech_score": 44, "combined": 48}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.1969, "end_return": 0.1095, "max_dd": -0.0542, "hit": true}}, "ticker": "SNOW", "close": 321.2900085449219, "prob": 0.52, "tech_score": 45, "combined": 48}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0854, "end_return": 0.0411, "max_dd": -0.039, "hit": false}}, "ticker": "XYZ", "close": 80.08000183105469, "prob": 0.453, "tech_score": 48, "combined": 47}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0892, "end_return": -0.0854, "max_dd": -0.1174, "hit": false}}, "ticker": "MDB", "close": 420.3699951171875, "prob": 0.52, "tech_score": 42, "combined": 47}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.077, "end_return": 0.0649, "max_dd": -0.0073, "hit": false}}, "ticker": "ACN", "close": 181.35000610351562, "prob": 0.52, "tech_score": 40, "combined": 46}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.082, "end_return": 0.0497, "max_dd": -0.0264, "hit": false}}, "ticker": "ADBE", "close": 272.2200012207031, "prob": 0.504, "tech_score": 41, "combined": 46}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.1081, "end_return": -0.0504, "max_dd": -0.0806, "hit": true}}, "ticker": "PANW", "close": 349.55999755859375, "prob": 0.44, "tech_score": 48, "combined": 46}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0194, "end_return": -0.0062, "max_dd": -0.0363, "hit": false}}, "ticker": "ABBV", "close": 261.8299865722656, "prob": 0.275, "tech_score": 63, "combined": 45}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0457, "end_return": 0.0176, "max_dd": -0.006, "hit": false}}, "ticker": "SBUX", "close": 103.98999786376953, "prob": 0.364, "tech_score": 54, "combined": 45}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0268, "end_return": -0.0279, "max_dd": -0.0353, "hit": false}}, "ticker": "PM", "close": 191.52000427246094, "prob": 0.261, "tech_score": 58, "combined": 42}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.1368, "end_return": 0.1183, "max_dd": -0.021, "hit": true}}, "ticker": "DE", "close": 620.9400024414062, "prob": 0.44, "tech_score": 41, "combined": 42}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.033, "end_return": -0.0291, "max_dd": -0.0541, "hit": false}}, "ticker": "EMR", "close": 154.72000122070312, "prob": 0.383, "tech_score": 45, "combined": 42}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0534, "end_return": 0.0474, "max_dd": -0.0036, "hit": false}}, "ticker": "BIIB", "close": 214.35000610351562, "prob": 0.336, "tech_score": 49, "combined": 41}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0355, "end_return": -0.0702, "max_dd": -0.0724, "hit": false}}, "ticker": "BKNG", "close": 209.8699951171875, "prob": 0.414, "tech_score": 41, "combined": 41}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0628, "end_return": 0.0535, "max_dd": -0.0443, "hit": false}}, "ticker": "NVDA", "close": 216.85000610351562, "prob": 0.364, "tech_score": 44, "combined": 40}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0305, "end_return": -0.0438, "max_dd": -0.0735, "hit": false}}, "ticker": "ETN", "close": 415.2900085449219, "prob": 0.364, "tech_score": 44, "combined": 40}
+{"scan_date": "2026-08-20", "model_horizon": 20, "evals": {"h10": {"max_gain": 0.0114, "end_return": -0.071, "max_dd": -0.0828, "hit": false}}, "ticker": "LOW", "close": 217.33999633789062, "prob": 0.383, "tech_score": 42, "combined": 40}
