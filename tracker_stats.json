@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-07T21:43:51.502204",
+  "updated_at": "2026-09-08T21:40:30.173689",
   "target": 0.1,
   "primary_horizon": 20,
   "horizons": {
@@ -49,11 +49,11 @@
       ]
     },
     "20": {
-      "n_evaluated": 243,
-      "hit_rate": 0.675,
-      "avg_end_return": 0.1062,
-      "median_end_return": 0.0777,
-      "avg_max_dd": -0.0897,
+      "n_evaluated": 273,
+      "hit_rate": 0.637,
+      "avg_end_return": 0.0951,
+      "median_end_return": 0.0693,
+      "avg_max_dd": -0.0885,
       "buckets": [
         {
           "prob_min": 0.0,
@@ -64,38 +64,38 @@
         {
           "prob_min": 0.15,
           "prob_max": 0.25,
-          "n": 8,
-          "hit_rate": 0.375
+          "n": 10,
+          "hit_rate": 0.3
         },
         {
           "prob_min": 0.25,
           "prob_max": 0.35,
-          "n": 39,
-          "hit_rate": 0.513
+          "n": 45,
+          "hit_rate": 0.467
         },
         {
           "prob_min": 0.35,
           "prob_max": 0.5,
-          "n": 132,
-          "hit_rate": 0.735
+          "n": 141,
+          "hit_rate": 0.702
         },
         {
           "prob_min": 0.5,
           "prob_max": 0.65,
-          "n": 59,
-          "hit_rate": 0.729
+          "n": 66,
+          "hit_rate": 0.712
         },
         {
           "prob_min": 0.65,
           "prob_max": 1.01,
-          "n": 4,
-          "hit_rate": 0.25
+          "n": 10,
+          "hit_rate": 0.4
         }
       ]
     }
   },
-  "n_evaluated": 243,
-  "overall_hit_rate": 0.675,
+  "n_evaluated": 273,
+  "overall_hit_rate": 0.637,
   "buckets": [
     {
       "prob_min": 0.0,
@@ -106,32 +106,32 @@
     {
       "prob_min": 0.15,
       "prob_max": 0.25,
-      "n": 8,
-      "hit_rate": 0.375
+      "n": 10,
+      "hit_rate": 0.3
     },
     {
       "prob_min": 0.25,
       "prob_max": 0.35,
-      "n": 39,
-      "hit_rate": 0.513
+      "n": 45,
+      "hit_rate": 0.467
     },
     {
       "prob_min": 0.35,
       "prob_max": 0.5,
-      "n": 132,
-      "hit_rate": 0.735
+      "n": 141,
+      "hit_rate": 0.702
     },
     {
       "prob_min": 0.5,
       "prob_max": 0.65,
-      "n": 59,
-      "hit_rate": 0.729
+      "n": 66,
+      "hit_rate": 0.712
     },
     {
       "prob_min": 0.65,
       "prob_max": 1.01,
-      "n": 4,
-      "hit_rate": 0.25
+      "n": 10,
+      "hit_rate": 0.4
     }
   ]
 }
