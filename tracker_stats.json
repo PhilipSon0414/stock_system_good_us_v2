@@ -1,14 +1,22 @@
 {
-  "updated_at": "2026-09-09T21:41:10.006003",
+  "updated_at": "2026-09-10T15:20:56.303932",
   "target": 0.1,
   "primary_horizon": 20,
   "horizons": {
     "10": {
-      "n_evaluated": 492,
-      "hit_rate": 0.358,
-      "avg_end_return": 0.0227,
-      "median_end_return": 0.0135,
-      "avg_max_dd": -0.0685,
+      "n_evaluated": 515,
+      "hit_rate": 0.357,
+      "avg_end_return": 0.0201,
+      "median_end_return": 0.0122,
+      "avg_max_dd": -0.0691,
+      "rule": {
+        "win_rate": 0.503,
+        "avg_return": 0.008,
+        "target_rate": 0.307,
+        "stop_rate": 0.365,
+        "time_rate": 0.328,
+        "stopped_before_hit": 0.141
+      },
       "buckets": [
         {
           "prob_min": 0.0,
@@ -19,41 +27,49 @@
         {
           "prob_min": 0.15,
           "prob_max": 0.25,
-          "n": 20,
-          "hit_rate": 0.15
+          "n": 22,
+          "hit_rate": 0.136
         },
         {
           "prob_min": 0.25,
           "prob_max": 0.35,
-          "n": 84,
-          "hit_rate": 0.25
+          "n": 89,
+          "hit_rate": 0.236
         },
         {
           "prob_min": 0.35,
           "prob_max": 0.5,
-          "n": 211,
+          "n": 219,
           "hit_rate": 0.374
         },
         {
           "prob_min": 0.5,
           "prob_max": 0.65,
-          "n": 148,
-          "hit_rate": 0.412
+          "n": 154,
+          "hit_rate": 0.422
         },
         {
           "prob_min": 0.65,
           "prob_max": 1.01,
-          "n": 28,
-          "hit_rate": 0.429
+          "n": 30,
+          "hit_rate": 0.433
         }
       ]
     },
     "20": {
       "n_evaluated": 302,
       "hit_rate": 0.619,
-      "avg_end_return": 0.0866,
+      "avg_end_return": 0.0867,
       "median_end_return": 0.0621,
       "avg_max_dd": -0.0874,
+      "rule": {
+        "win_rate": 0.53,
+        "avg_return": 0.0162,
+        "target_rate": 0.444,
+        "stop_rate": 0.414,
+        "time_rate": 0.142,
+        "stopped_before_hit": 0.283
+      },
       "buckets": [
         {
           "prob_min": 0.0,

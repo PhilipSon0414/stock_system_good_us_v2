@@ -30,7 +30,10 @@ from pandas.tseries.offsets import BDay
 
 from config import (MIN_PRICE, MIN_AVG_VOLUME, TECH_SCORE_GATE, FINAL_MIN_SCORE,
                     TOP_N_REPORT, TOP_N_DETAIL, W_SCORE, W_MODEL,
-                    SURGE_TARGET, SURGE_HORIZON)
+                    SURGE_TARGET, SURGE_HORIZON,
+                    COACH_HOLD_DAYS, COACH_STOP_ATR_MULT, COACH_STOP_MIN,
+                    COACH_STOP_MAX, COACH_D3_STRONG, COACH_D3_HOLD,
+                    COACH_D3_CUT_ATR, COACH_D3_CUT_MIN)
 from universe import get_ticker_list
 from data_fetcher import (get_ohlcv, get_info, short_signal, fmt_market_cap,
                           FetchLog)
@@ -70,9 +73,11 @@ def analyze_phase1(ticker: str, end_date: str | None, log: FetchLog) -> dict | N
 
     latest = df.iloc[-1]
     pvm = latest.get('PriceVsMA20')
+    atr = latest.get('ATRRel')
     return {
         'ticker': ticker, 'price': close, 'df': df, 'ob': ob,
         'tech_score': tech, 'tags': tags,
+        'atr_rel': float(atr) if atr is not None and atr == atr else None,
         'vol_ratio': float(latest.get('VolRatio') or 0),
         'price_vs_ma20': round(float(pvm) * 100, 1) if pvm is not None and pvm == pvm else None,
         'gain5d': float(latest.get('Gain5D') or 0),
@@ -114,33 +119,50 @@ def analyze_phase2(r: dict, model_payload: dict | None, spy_ret20: float | None,
 
 # ── 엘리트픽 ─────────────────────────────────────────────────────────────────
 
+def apply_gate(results: list, gate: float) -> None:
+    """실측 기반 게이트(tracker.recommended_min_prob)를 모든 예측에 적용.
+    모델 파일의 임계값(pred['passes'])은 여기서 덮어쓴다."""
+    for r in results:
+        pred = r.get('pred')
+        if pred:
+            pred['threshold'] = gate
+            pred['passes'] = pred['prob'] >= gate
+
+
 def get_elite_picks(results: list, model_ok: bool) -> list:
-    """확률 게이트 통과 + 과열 아님 + 기술점수 상위. 모델이 없으면
-    기술점수 단독 기준이며 리포트에 그 사실이 표시된다."""
+    """확률 게이트 통과 + 과열 아님. 기술점수·공매도는 부가 사유일 뿐
+    단독으로 엘리트가 되지 못한다 (실측에서 기술점수 상위는 적중률이 낮았다).
+    모델이 없으면 기술점수 75+ 단독 기준이며 리포트에 그 사실이 표시된다."""
     elite = []
     for r in results:
-        reasons = []
         pred = r.get('pred')
-        overheated = r.get('gain5d', 0) >= 0.15
-        if overheated:
+        if r.get('gain5d', 0) >= 0.15:
             continue
-        if model_ok and pred and pred['passes']:
-            reasons.append(f'급등확률 {pred["prob"]:.0%} (임계값 {pred["threshold"]:.0%} 통과)')
-        if r['tech_score'] >= 75:
-            reasons.append(f'기술점수 {r["tech_score"]}')
+        if model_ok:
+            if not (pred and pred['passes']):
+                continue
+            reasons = [f'급등확률 {pred["prob"]:.0%} (게이트 {pred["threshold"]:.0%} 통과)']
+        else:
+            if r['tech_score'] < 75:
+                continue
+            reasons = [f'기술점수 {r["tech_score"]} (모델 미학습)']
         sp = (r.get('info') or {}).get('short_pct')
-        if sp is not None and sp >= 20 and r['tech_score'] >= 60:
+        if sp is not None and sp >= 20:
             reasons.append(f'공매도 {sp:.0f}% 스퀴즈 후보')
-        if reasons:
-            elite.append({**r, 'elite_reasons': reasons})
+        elite.append({**r, 'elite_reasons': reasons})
     return sorted(elite, key=lambda x: x['combined'], reverse=True)[:10]
 
 
-# ── 실전 코칭 (확정 투자 방식의 운용 규칙을 실제 픽 가격으로 환산) ──────────
-# 체크포인트 확률의 출처: trajectory_miner.py 3y 분석 (신호 32,416건) —
-#   D+3 종가 +5%↑ → 최종 적중 90% / +2~+5% → 52% / -5%↓ → 17%
-#   급등군 75%는 터치 전 낙폭 -5.6% 이내 → 손절 -7%
-#   급등군 80%가 D+7까지 터치 → D+10 시간 손절
+# ── 실전 코칭 (운용 규칙을 실제 픽 가격으로 환산) ────────────────────────────
+# 손절/보유기간 근거는 config.py 코칭 섹션 참고. D+3 체크포인트 적중률은
+# 실제 픽 545건 실측: +5%↑ 79%/92%(10일/20일), +2~5% 48%/80%,
+# -2~+2% 22~28%/40~65%, -5%↓ 11%/35%.
+
+def coaching_stop_pct(atr_rel: float | None) -> float:
+    if atr_rel is None or atr_rel != atr_rel:
+        return COACH_STOP_MIN
+    return min(COACH_STOP_MAX, max(COACH_STOP_MIN, COACH_STOP_ATR_MULT * atr_rel))
+
 
 def build_coaching(results: list, elite: list, scan_date: str) -> list[dict]:
     """1순위(엘리트픽 ∩ 전조패턴, 없으면 엘리트픽 상위) 종목의 매매 파라미터."""
@@ -150,17 +172,25 @@ def build_coaching(results: list, elite: list, scan_date: str) -> list[dict]:
         prime = [r for r in results if r['ticker'] in elite_t]
     d0 = pd.Timestamp(scan_date)
     dates = {k: (d0 + BDay(n)).strftime('%m/%d')
-             for k, n in [('d3', 3), ('d5', 5), ('d7', 7), ('d10', 10)]}
+             for k, n in [('d3', 3), ('d10', 10), ('d20', COACH_HOLD_DAYS)]}
     out = []
     for r in prime[:3]:
         p = r['price']
+        atr = r.get('atr_rel')
+        stop_pct = coaching_stop_pct(atr)
+        cut_pct = max(COACH_D3_CUT_MIN, COACH_D3_CUT_ATR * (atr or 0))
         out.append({
             'ticker': r['ticker'], 'name': r['name'], 'price': round(p, 2),
-            'target': round(p * 1.10, 2),      # +10% GTC 지정가
-            'stop': round(p * 0.93, 2),        # -7% 손절
-            'd3_strong': round(p * 1.05, 2),   # D+3 +5%↑ → 강홀드 (90%)
-            'd3_hold': round(p * 1.02, 2),     # D+3 +2%↑ → 홀드 (52%)
-            'd3_cut': round(p * 0.95, 2),      # D+3 -5%↓ → 조기 정리 (17%)
+            'atr_pct': round((atr or 0) * 100, 1),
+            'target': round(p * (1 + SURGE_TARGET), 2),
+            'stop_pct': round(stop_pct * 100, 1),
+            'stop': round(p * (1 - stop_pct), 2),
+            'd3_strong': round(p * (1 + COACH_D3_STRONG), 2),
+            'd3_hold': round(p * (1 + COACH_D3_HOLD), 2),
+            'd3_watch': round(p * (1 - COACH_D3_HOLD), 2),
+            'd3_cut_pct': round(cut_pct * 100, 1),
+            'd3_cut': round(p * (1 - cut_pct), 2),
+            'hold_days': COACH_HOLD_DAYS,
             **dates,
         })
     return out
@@ -216,21 +246,24 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
         L.append(sep2)
         L.append('')
 
-    # 실전 코칭 (확정 운용 규칙 — 3y 궤적 분석 기반, trajectory_miner.py)
+    # 실전 코칭 (운용 규칙 — 실제 픽 실측 기반, config.py 코칭 섹션)
     if coaching:
         L.append('  [ 실전 코칭 — 1순위 (엘리트픽 ∩ 전조패턴, 최대 3종목) ]')
         L.append(sep2)
         for c in coaching:
-            L.append(f'  ▸ {c["ticker"]} {c["name"][:24]} — 현재가 ${c["price"]:.2f}')
-            L.append(f'      매수 시 동시 주문: 목표 ${c["target"]:.2f} (+10% GTC 지정가)'
-                     f' | 손절 ${c["stop"]:.2f} (-7%)')
-            L.append(f'      D+3({c["d3"]}) 종가 점검: ${c["d3_strong"]:.2f}↑ 강홀드(적중90%)'
-                     f' / ${c["d3_hold"]:.2f}↑ 홀드(52%)'
-                     f' / ${c["d3_cut"]:.2f}↓ 조기 정리(17%)')
-            L.append(f'      D+7({c["d7"]})까지 미터치면 급등확률 80% 소진'
-                     f' → D+10({c["d10"]}) 전후 정리')
+            L.append(f'  ▸ {c["ticker"]} {c["name"][:24]} — 현재가 ${c["price"]:.2f}'
+                     f'  (ATR {c["atr_pct"]:.1f}%)')
+            L.append(f'      매수 시 동시 주문: 목표 ${c["target"]:.2f} (+{SURGE_TARGET*100:.0f}% GTC 지정가)'
+                     f' | 손절 ${c["stop"]:.2f} (-{c["stop_pct"]:.1f}% = 3×ATR)')
+            L.append(f'      D+3({c["d3"]}) 종가 점검: ${c["d3_strong"]:.2f}↑ 강홀드(적중~80%)'
+                     f' / ${c["d3_hold"]:.2f}↑ 홀드(~50%)'
+                     f' / ${c["d3_watch"]:.2f}~${c["d3_hold"]:.2f} 관망(~25%)'
+                     f' / ${c["d3_cut"]:.2f}↓ 조기 정리(-{c["d3_cut_pct"]:.1f}%, ~10%)')
+            L.append(f'      D+10({c["d10"]})까지 미터치면 잔여 확률 낮음(급등군 68%가 D+10 내 도달)'
+                     f' → 손절 유지, D+{c["hold_days"]}({c["d20"]}) 정리')
         L.append(sep2)
-        L.append('  ※ 종목당 자금 10~15% 이하, 보유 2주 내 실적 발표 여부 확인.')
+        L.append('  ※ 손절폭이 넓으므로 종목당 자금 = 총자금 1~1.5% ÷ 손절폭(예: 손절 12% → 10%).')
+        L.append('  ※ 보유 4주 내 실적 발표 여부 확인.')
         L.append('')
 
     # 전체 순위
@@ -358,6 +391,8 @@ def main(market: str = 'ALL', scan_date: str | None = None):
     if model_ok:
         default_thr = load_model()['threshold']
     gate, gate_note = tracker.recommended_min_prob(default_thr)
+    if model_ok:
+        apply_gate(results, gate)
 
     elite = get_elite_picks(results, model_ok)
     coaching = build_coaching(results, elite, date_str)
@@ -393,6 +428,8 @@ def main(market: str = 'ALL', scan_date: str | None = None):
         'ticker': r['ticker'], 'close': r['price'],
         'prob': (r.get('pred') or {}).get('prob'),
         'tech_score': r['tech_score'], 'combined': r['combined'],
+        'atr_rel': r.get('atr_rel'),
+        'stop_pct': round(coaching_stop_pct(r.get('atr_rel')), 4),
     } for r in results], scan_date=date_str)
     tracker.evaluate(verbose=True)
 
