@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-10T15:28:25.018026",
+  "updated_at": "2026-09-10T15:35:53.412184",
   "target": 0.1,
   "primary_horizon": 20,
   "horizons": {
@@ -54,6 +54,45 @@
           "n": 30,
           "hit_rate": 0.433
         }
+      ],
+      "n_independent": 166,
+      "buckets_independent": [
+        {
+          "prob_min": 0.0,
+          "prob_max": 0.15,
+          "n": 1,
+          "hit_rate": 0.0
+        },
+        {
+          "prob_min": 0.15,
+          "prob_max": 0.25,
+          "n": 10,
+          "hit_rate": 0.2
+        },
+        {
+          "prob_min": 0.25,
+          "prob_max": 0.35,
+          "n": 32,
+          "hit_rate": 0.219
+        },
+        {
+          "prob_min": 0.35,
+          "prob_max": 0.5,
+          "n": 55,
+          "hit_rate": 0.345
+        },
+        {
+          "prob_min": 0.5,
+          "prob_max": 0.65,
+          "n": 58,
+          "hit_rate": 0.31
+        },
+        {
+          "prob_min": 0.65,
+          "prob_max": 1.01,
+          "n": 10,
+          "hit_rate": 0.4
+        }
       ]
     },
     "20": {
@@ -107,8 +146,57 @@
           "n": 16,
           "hit_rate": 0.562
         }
+      ],
+      "n_independent": 83,
+      "buckets_independent": [
+        {
+          "prob_min": 0.0,
+          "prob_max": 0.15,
+          "n": 1,
+          "hit_rate": 0.0
+        },
+        {
+          "prob_min": 0.15,
+          "prob_max": 0.25,
+          "n": 7,
+          "hit_rate": 0.286
+        },
+        {
+          "prob_min": 0.25,
+          "prob_max": 0.35,
+          "n": 20,
+          "hit_rate": 0.3
+        },
+        {
+          "prob_min": 0.35,
+          "prob_max": 0.5,
+          "n": 32,
+          "hit_rate": 0.531
+        },
+        {
+          "prob_min": 0.5,
+          "prob_max": 0.65,
+          "n": 21,
+          "hit_rate": 0.476
+        },
+        {
+          "prob_min": 0.65,
+          "prob_max": 1.01,
+          "n": 2,
+          "hit_rate": 1.0
+        }
       ]
     }
+  },
+  "recent": {
+    "horizon": 10,
+    "n_scans": 10,
+    "n": 272,
+    "from": "2026-08-10",
+    "to": "2026-08-25",
+    "hit_rate": 0.239,
+    "rule_win_rate": 0.478,
+    "rule_avg_return": 0.0026
   },
   "n_evaluated": 302,
   "overall_hit_rate": 0.619,

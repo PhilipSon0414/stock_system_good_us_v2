@@ -48,6 +48,13 @@ REPORTS_DIR.mkdir(exist_ok=True)
 
 PATTERN_HORIZONS = [5, 10]   # 1주 / 2주
 
+# 규칙 채택 기준 (홀드아웃). 이전 규칙 중 H5-R6(홀드아웃 5,162건·정밀도 20%),
+# H10-R5(6,301건·41%)는 유니버스의 1/3을 덮는 사실상 무규칙이었다.
+RULE_MIN_LIFT      = 1.25   # base 대비 lift 하한
+RULE_MIN_PRECISION = 0.35   # 절대 정밀도 하한
+RULE_MAX_COVERAGE  = 0.15   # 홀드아웃 커버리지 상한 (이보다 넓으면 '전조'가 아니다)
+RULE_MIN_N         = 300    # 홀드아웃 최소 표본
+
 # ── 피처 사전 (리포트 한국어 표기 + 퍼센트 여부) ─────────────────────────────
 BINARY_FEATURES = {
     'MA20AboveMA50':  '단기 정배열 (MA20>MA50)',
@@ -213,11 +220,12 @@ def extract_rules(d: pd.DataFrame, label: str, horizon: int) -> list[dict]:
                 mask_h &= hold[f] > thr
                 mask_t &= train[f] > thr
         n_h = int(mask_h.sum())
-        if n_h < 300:
+        coverage = n_h / len(hold)
+        if n_h < RULE_MIN_N or coverage > RULE_MAX_COVERAGE:
             continue
         prec_h = float(hold.loc[mask_h, label].mean())
         lift_h = prec_h / base_hold if base_hold else float('nan')
-        if lift_h < 1.25:                          # 홀드아웃에서도 유효한 규칙만
+        if lift_h < RULE_MIN_LIFT or prec_h < RULE_MIN_PRECISION:
             continue
         out.append({
             'horizon': horizon,
@@ -226,6 +234,7 @@ def extract_rules(d: pd.DataFrame, label: str, horizon: int) -> list[dict]:
             'precision_holdout': round(prec_h, 3),
             'lift_holdout': round(lift_h, 2),
             'n_holdout': n_h,
+            'coverage_holdout': round(coverage, 3),
             'precision_train': round(float(train.loc[mask_t, label].mean()), 3),
             'base_holdout': round(float(base_hold), 3),
         })
@@ -334,9 +343,10 @@ def build_report(d: pd.DataFrame, horizon: int) -> tuple[str, list[dict]]:
             L.append(f'  {r["name"]}: {describe_rule(r)}')
             L.append(f'        홀드아웃 적중률 {r["precision_holdout"]:.1%}'
                      f'  (base {r["base_holdout"]:.1%}, lift {r["lift_holdout"]:.2f}x,'
-                     f' n={r["n_holdout"]:,})')
+                     f' n={r["n_holdout"]:,}, 커버리지 {r["coverage_holdout"]:.1%})')
     else:
-        L.append('  홀드아웃 검증을 통과한 규칙 없음 (lift 1.25x 미만)')
+        L.append(f'  홀드아웃 검증을 통과한 규칙 없음 (lift {RULE_MIN_LIFT}x / '
+                 f'정밀도 {RULE_MIN_PRECISION:.0%} / 커버리지 {RULE_MAX_COVERAGE:.0%} 기준)')
     L += ['', sep,
           '  ※ 참고용 분석. 급등의 "전조"는 확률적 경향이며 보장이 아님.',
           sep]

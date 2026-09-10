@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 
 from config import (SURGE_TARGET, SURGE_HORIZON, HOLD_HORIZONS, TARGET_PRECISION,
-                    COACH_STOP_MIN)
+                    COACH_STOP_MIN, TRACKER_MIN_BUCKET_N, RECENT_SCANS)
 from data_fetcher import get_ohlcv
 
 HERE = Path(__file__).parent
@@ -128,6 +128,47 @@ def _needs_eval(r: dict, horizon: int) -> bool:
     return ev is None or 'rule_outcome' not in ev
 
 
+def _independent(done: list[dict], horizon: int) -> list[dict]:
+    """종목별로 평가 창(horizon 거래일 ≈ 1.4배 달력일)이 겹치지 않는 레코드만.
+    연일 반복 등장하는 종목이 같은 급등을 여러 번 세는 것을 막는다."""
+    gap = timedelta(days=int(horizon * 1.4))
+    last: dict[str, datetime] = {}
+    out = []
+    for r in sorted(done, key=lambda r: (r['ticker'], r['scan_date'])):
+        d = datetime.strptime(r['scan_date'], '%Y-%m-%d')
+        if r['ticker'] not in last or d - last[r['ticker']] >= gap:
+            out.append(r)
+            last[r['ticker']] = d
+    return out
+
+
+def _buckets(done: list[dict], horizon: int) -> list[dict]:
+    hits  = np.array([bool(r['evals'][f'h{horizon}']['hit']) for r in done])
+    probs = np.array([r.get('prob') if r.get('prob') is not None else -1 for r in done])
+    out = []
+    for lo, hi in zip(PROB_BUCKETS[:-1], PROB_BUCKETS[1:]):
+        m = (probs >= lo) & (probs < hi)
+        if m.sum():
+            out.append({'prob_min': lo, 'prob_max': hi, 'n': int(m.sum()),
+                        'hit_rate': round(float(hits[m].mean()), 3)})
+    return out
+
+
+def _recent(records: list[dict], horizon: int = 10) -> dict | None:
+    """최근 RECENT_SCANS회 스캔(평가 완료분)의 실측 — 국면 악화 조기 감지용."""
+    done = [r for r in records if r['evals'].get(f'h{horizon}')]
+    dates = sorted({r['scan_date'] for r in done})[-RECENT_SCANS:]
+    if not dates:
+        return None
+    sub = [r for r in done if r['scan_date'] in dates]
+    rule_ret = np.array([r['evals'][f'h{horizon}']['rule_return'] for r in sub])
+    return {'horizon': horizon, 'n_scans': len(dates), 'n': len(sub),
+            'from': dates[0], 'to': dates[-1],
+            'hit_rate': round(float(np.mean([r['evals'][f'h{horizon}']['hit'] for r in sub])), 3),
+            'rule_win_rate': round(float((rule_ret > 0).mean()), 3),
+            'rule_avg_return': round(float(rule_ret.mean()), 4)}
+
+
 def evaluate(verbose: bool = True) -> dict | None:
     """기한이 지난 미평가 예측을 HOLD_HORIZONS별로 실측과 대조. 통계 갱신."""
     records = _load_all()
@@ -175,16 +216,7 @@ def evaluate(verbose: bool = True) -> dict | None:
         dds   = np.array([r['evals'][f'h{h}'].get('max_dd')
                           if r['evals'][f'h{h}'].get('max_dd') is not None
                           else np.nan for r in done], dtype=float)
-        probs = np.array([r.get('prob') if r.get('prob') is not None else -1
-                          for r in done])
-
-        buckets = []
-        for lo, hi in zip(PROB_BUCKETS[:-1], PROB_BUCKETS[1:]):
-            m = (probs >= lo) & (probs < hi)
-            if m.sum():
-                buckets.append({'prob_min': lo, 'prob_max': hi,
-                                'n': int(m.sum()),
-                                'hit_rate': round(float(hits[m].mean()), 3)})
+        indep = _independent(done, h)
 
         outcomes = np.array([r['evals'][f'h{h}']['rule_outcome'] for r in done])
         rule_ret = np.array([r['evals'][f'h{h}']['rule_return'] for r in done], dtype=float)
@@ -211,13 +243,18 @@ def evaluate(verbose: bool = True) -> dict | None:
                 'stopped_before_hit': (round(float(stopped_winners.sum() / hits.sum()), 3)
                                        if hits.sum() else None),
             },
-            'buckets': buckets,
+            'buckets': _buckets(done, h),
+            # 게이트 판단용 — 종목별 비겹침 창 1건 (겹침 표본은 n을 부풀린다)
+            'n_independent': len(indep),
+            'buckets_independent': _buckets(indep, h),
         }
 
     if not stats['horizons']:
         if verbose:
             print('  [추적] 아직 평가 가능한 예측 없음 (기한 미도래)')
         return None
+
+    stats['recent'] = _recent(records)
 
     # 구형 소비자(요약 스크립트 등) 호환: 주 기한 통계를 톱레벨에도 유지
     prim = stats['horizons'].get(str(SURGE_HORIZON))
@@ -248,31 +285,63 @@ def evaluate(verbose: bool = True) -> dict | None:
             print(f'          규칙 승률 {ru["win_rate"]:.0%}  평균 {ru["avg_return"]*100:+.1f}%'
                   f'  [목표 {ru["target_rate"]:.0%} / 손절 {ru["stop_rate"]:.0%}'
                   f' / 기한 {ru["time_rate"]:.0%}]{sbh}')
+            ind = {b['prob_min']: b for b in hs['buckets_independent']}
             for b in hs['buckets']:
+                ib = ind.get(b['prob_min'])
+                ind_s = f'  독립 {ib["hit_rate"]:.0%} ({ib["n"]}건)' if ib else ''
                 print(f'          확률 {b["prob_min"]:.2f}~{b["prob_max"]:.2f}: '
-                      f'{b["hit_rate"]:.0%} ({b["n"]}건)')
+                      f'{b["hit_rate"]:.0%} ({b["n"]}건){ind_s}')
+        rc = stats.get('recent')
+        if rc:
+            print(f'  [최근] {rc["n_scans"]}회 스캔({rc["from"]}~{rc["to"]}, {rc["n"]}건, '
+                  f'{rc["horizon"]}일) — 터치율 {rc["hit_rate"]:.0%}  '
+                  f'규칙 승률 {rc["rule_win_rate"]:.0%}  평균 {rc["rule_avg_return"]*100:+.1f}%')
     return stats
 
 
-def recommended_min_prob(default: float) -> tuple[float, str]:
-    """주 기한(SURGE_HORIZON)의 실현 정밀도가 TARGET_PRECISION 이상인 최소
-    확률 버킷 하한을 게이트로 권고. 표본 20건 미만이면 모델 임계값 유지."""
+def _load_stats() -> dict | None:
     if not STATS_PATH.exists():
-        return default, '실측 표본 없음 → 모델 임계값 사용'
+        return None
     try:
-        stats = json.loads(STATS_PATH.read_text(encoding='utf-8'))
+        return json.loads(STATS_PATH.read_text(encoding='utf-8'))
     except Exception:
-        return default, '통계 파일 손상 → 모델 임계값 사용'
+        return None
 
-    # 신형(horizons 딕셔너리) 우선, 구형 파일이면 톱레벨 키 사용
+
+def recent_performance() -> dict | None:
+    """최근 RECENT_SCANS회 스캔 실측 (evaluate()가 저장한 값)."""
+    stats = _load_stats()
+    return (stats or {}).get('recent')
+
+
+def recommended_min_prob(default: float) -> tuple[float, str]:
+    """주 기한(SURGE_HORIZON)의 독립 표본에서, 게이트 이상 픽의 누적 정밀도가
+    TARGET_PRECISION 이상이 되는 최소 확률 구간 하한을 권고.
+    누적 표본 TRACKER_MIN_BUCKET_N 미만이면 모델 임계값 유지.
+    (구간별이 아니라 누적 정밀도를 쓰므로 상위 구간이 나빠지면 게이트가
+    내려가지 않는다 — 날마다 0.25↔0.35로 흔들리던 문제 방지)"""
+    stats = _load_stats()
+    if stats is None:
+        return default, '실측 표본 없음/손상 → 모델 임계값 사용'
+
     hs = stats.get('horizons', {}).get(str(SURGE_HORIZON), stats)
-    n_eval  = hs.get('n_evaluated', 0)
-    eligible = [b for b in hs.get('buckets', [])
-                if b['n'] >= 20 and b['hit_rate'] >= TARGET_PRECISION]
-    if not eligible:
-        return default, (f'{SURGE_HORIZON}일 실측 {n_eval}건 중 목표 정밀도 '
+    buckets = hs.get('buckets_independent') or hs.get('buckets', [])
+    n_total = hs.get('n_independent', hs.get('n_evaluated', 0))
+
+    best = None
+    for b in sorted(buckets, key=lambda b: b['prob_min']):
+        upper = [u for u in buckets if u['prob_min'] >= b['prob_min']]
+        n = sum(u['n'] for u in upper)
+        if n < TRACKER_MIN_BUCKET_N:
+            continue
+        prec = sum(u['n'] * u['hit_rate'] for u in upper) / n
+        if prec >= TARGET_PRECISION:
+            best = (b['prob_min'], prec, n)
+            break
+    if best is None:
+        return default, (f'{SURGE_HORIZON}일 독립 표본 {n_total}건 중 목표 정밀도 '
                          f'{TARGET_PRECISION:.0%} 달성 구간 없음 → 모델 임계값 사용')
-    best = min(eligible, key=lambda b: b['prob_min'])
-    return max(default, best['prob_min']), (
-        f'실측({SURGE_HORIZON}일) 기반 게이트: 확률 {best["prob_min"]:.2f}+ 구간 '
-        f'적중률 {best["hit_rate"]:.0%} ({best["n"]}건)')
+    pmin, prec, n = best
+    return max(default, pmin), (
+        f'실측({SURGE_HORIZON}일, 독립 {n_total}건) 기반 게이트: 확률 {pmin:.2f}+ '
+        f'누적 적중률 {prec:.0%} ({n}건)')

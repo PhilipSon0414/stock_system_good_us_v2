@@ -33,14 +33,15 @@ from config import (MIN_PRICE, MIN_AVG_VOLUME, TECH_SCORE_GATE, FINAL_MIN_SCORE,
                     SURGE_TARGET, SURGE_HORIZON,
                     COACH_HOLD_DAYS, COACH_MIN_ATR, COACH_STOP_ATR_MULT, COACH_STOP_MIN,
                     COACH_STOP_MAX, COACH_D3_STRONG, COACH_D3_HOLD,
-                    COACH_D3_CUT_ATR, COACH_D3_CUT_MIN)
+                    COACH_D3_CUT_ATR, COACH_D3_CUT_MIN,
+                    REGIME_WARN_HIT, REGIME_HALT_HIT)
 from universe import get_ticker_list
 from data_fetcher import (get_ohlcv, get_info, short_signal, fmt_market_cap,
                           FetchLog)
 from indicators import add_all
 from order_block import get_order_blocks, calc_trade_params
 from scorer import score_technical
-from surge_model import load_model, predict_prob
+from surge_model import load_model, predict_prob, spy_frame
 from pattern_miner import load_rules, match_rules
 from email_sender import send_report
 import tracker
@@ -84,7 +85,7 @@ def analyze_phase1(ticker: str, end_date: str | None, log: FetchLog) -> dict | N
     }
 
 
-def analyze_phase2(r: dict, model_payload: dict | None, spy_ret20: float | None,
+def analyze_phase2(r: dict, model_payload: dict | None, spy: pd.DataFrame,
                    log: FetchLog) -> dict:
     """2차: 재무/공매도 + 모델 확률 + 최종 점수."""
     info = get_info(r['ticker'], log=log)
@@ -98,7 +99,7 @@ def analyze_phase2(r: dict, model_payload: dict | None, spy_ret20: float | None,
     pred = None
     if model_payload is not None:
         try:
-            pred = predict_prob(r['df'], loaded=model_payload)
+            pred = predict_prob(r['df'], loaded=model_payload, spy=spy)
         except Exception as e:
             print(f'  ⚠ {r["ticker"]} 모델 예측 실패: {str(e)[:60]}')
     r['pred'] = pred
@@ -110,6 +111,10 @@ def analyze_phase2(r: dict, model_payload: dict | None, spy_ret20: float | None,
 
     # RS vs SPY (20일)
     r['rs_vs_spy'] = None
+    spy_ret20 = None
+    if len(spy) >= 21:
+        sc = spy['SPY_Close']
+        spy_ret20 = (float(sc.iloc[-1]) / float(sc.iloc[-21]) - 1) * 100
     if spy_ret20 is not None and len(r['df']) >= 21:
         c = r['df']['Close']
         stock_ret = (float(c.iloc[-1]) / float(c.iloc[-21]) - 1) * 100
@@ -201,7 +206,8 @@ def build_coaching(results: list, elite: list, scan_date: str) -> list[dict]:
 
 def build_report(results: list, elite: list, market: str, model_ok: bool,
                  gate_note: str, log: FetchLog, scan_date: str,
-                 coaching: list[dict] | None = None) -> str:
+                 coaching: list[dict] | None = None,
+                 regime: str | None = None) -> str:
     sep, sep2 = '═' * 70, '─' * 70
     L = [sep,
          f'  미국 주식 +{SURGE_TARGET*100:.0f}% 급등 후보 스캔 (v2)',
@@ -251,6 +257,9 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
     if coaching:
         L.append('  [ 실전 코칭 — 1순위 (엘리트픽 ∩ 전조패턴, 최대 3종목) ]')
         L.append(sep2)
+        if regime:
+            L.append(f'  {regime}')
+            L.append(sep2)
         for c in coaching:
             L.append(f'  ▸ {c["ticker"]} {c["name"][:24]} — 현재가 ${c["price"]:.2f}'
                      f'  (ATR {c["atr_pct"]:.1f}%)')
@@ -333,10 +342,17 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
 
 # ── 메인 ─────────────────────────────────────────────────────────────────────
 
-def get_spy_ret20(end_date: str | None, log: FetchLog) -> float | None:
-    spy = get_ohlcv('SPY', period='1y', end_date=end_date, log=log)
-    if len(spy) >= 21:
-        return (float(spy['Close'].iloc[-1]) / float(spy['Close'].iloc[-21]) - 1) * 100
+def regime_note(recent: dict | None) -> str | None:
+    """최근 스캔 실측이 무너졌으면 코칭에 붙일 경고. 정상이면 None."""
+    if not recent:
+        return None
+    hr = recent['hit_rate']
+    head = (f'최근 {recent["n_scans"]}회 스캔({recent["from"]}~{recent["to"]}) '
+            f'{recent["horizon"]}일 터치율 {hr:.0%}, 규칙 승률 {recent["rule_win_rate"]:.0%}')
+    if hr < REGIME_HALT_HIT:
+        return f'⛔ {head} — 국면 악화: 신규 진입 보류, 보유분은 손절만 유지'
+    if hr < REGIME_WARN_HIT:
+        return f'⚠ {head} — 국면 주의: 종목당 자금 절반으로 축소'
     return None
 
 
@@ -362,9 +378,11 @@ def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
         time.sleep(0.05)
     print(f'\n  1차 통과: {len(phase1)}종목 (기술점수 {TECH_SCORE_GATE}+)')
 
-    # 2차: info + 모델
-    spy_ret20 = get_spy_ret20(scan_date, log)
-    results = [analyze_phase2(r, model_payload, spy_ret20, log) for r in phase1]
+    # 2차: info + 모델 (SPY 국면 피처는 스캔당 1회 수집)
+    spy = spy_frame(scan_date, period='1y', log=log)
+    if spy.empty:
+        print('  ⚠ SPY 수집 실패 — 국면 피처 모델은 예측 불가, RS 미계산')
+    results = [analyze_phase2(r, model_payload, spy, log) for r in phase1]
     results = [r for r in results if r['combined'] >= FINAL_MIN_SCORE]
     results.sort(key=lambda x: x['combined'], reverse=True)
     results = results[:TOP_N_REPORT]
@@ -387,6 +405,9 @@ def main(market: str = 'ALL', scan_date: str | None = None):
             print(line)
         return
 
+    # 기한 도래분 실측 평가를 먼저 — 오늘 게이트와 국면 경고가 최신 실측을 쓰도록
+    tracker.evaluate(verbose=True)
+
     # 실측 기반 게이트
     default_thr = 0.0
     if model_ok:
@@ -397,8 +418,9 @@ def main(market: str = 'ALL', scan_date: str | None = None):
 
     elite = get_elite_picks(results, model_ok)
     coaching = build_coaching(results, elite, date_str)
+    regime = regime_note(tracker.recent_performance())
     report = build_report(results, elite, market, model_ok, gate_note, log,
-                          date_str, coaching)
+                          date_str, coaching, regime)
     print('\n' + report)
 
     # 저장 (텍스트 리포트 + 요약 이메일용 JSON)
@@ -407,6 +429,7 @@ def main(market: str = 'ALL', scan_date: str | None = None):
     scan_json = {
         'scan_date': date_str, 'market': market, 'model_ok': model_ok,
         'gate_note': gate_note,
+        'regime_note': regime,
         'coaching': coaching,
         'results': [{
             'ticker': r['ticker'], 'name': r['name'], 'price': r['price'],
@@ -432,7 +455,6 @@ def main(market: str = 'ALL', scan_date: str | None = None):
         'atr_rel': r.get('atr_rel'),
         'stop_pct': round(coaching_stop_pct(r.get('atr_rel')), 4),
     } for r in results], scan_date=date_str)
-    tracker.evaluate(verbose=True)
 
     # 이메일
     subject = (f'[미국주식 v2] {date_str} — 엘리트픽 {len(elite)}종목'

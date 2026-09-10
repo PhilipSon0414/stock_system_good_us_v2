@@ -26,6 +26,7 @@ v1의 스테이지 분류 모델을 폐기하고 목표에 직결되는 이진 �
 사용:
   python3 surge_model.py train      # 데이터 구축 + walk-forward 평가 + 모델 저장
   python3 surge_model.py backtest   # walk-forward 평가만
+  python3 surge_model.py compare    # 국면 피처 제외/포함 walk-forward 비교
 """
 
 import sys
@@ -52,12 +53,45 @@ from universe import get_ticker_list
 HERE = Path(__file__).parent
 MODEL_PATH = HERE / 'surge_model.pkl'
 
+# 시장 국면 피처 — SPY에서 계산해 날짜로 병합. 학습·예측이 같은 원천(SPY)을
+# 쓰므로 유니버스 차이에 따른 분포 이동이 없다. (실측: 2026-08-10 이후
+# 10일 터치율이 60%대→13~43%로 급락했으나 모델은 이를 볼 수 없었다)
+REGIME_FEATURES = ['SPY_Ret5', 'SPY_Ret20', 'SPY_AboveMA50', 'SPY_Vol20']
 
-def feature_columns() -> list[str]:
+
+def feature_columns(regime: bool = True) -> list[str]:
     cols = list(MODEL_FEATURES)
     for c in TREND_FEATURES:
         cols += [f'd{c}_1d', f'd{c}_3d', f'd{c}_5d']
+    if regime:
+        cols += REGIME_FEATURES
     return cols
+
+
+def spy_frame(end_date: str | None = None, period: str = HISTORY_PERIOD,
+              log: FetchLog | None = None) -> pd.DataFrame:
+    """SPY 국면 피처 (날짜 인덱스). 실패 시 빈 DataFrame."""
+    spy = get_ohlcv('SPY', period=period, end_date=end_date, log=log)
+    if spy.empty:
+        return spy
+    c = spy['Close']
+    out = pd.DataFrame(index=spy.index)
+    out['SPY_Close']     = c
+    out['SPY_Ret5']      = c.pct_change(5)
+    out['SPY_Ret20']     = c.pct_change(20)
+    out['SPY_AboveMA50'] = (c > c.rolling(50).mean()).astype(float)
+    out['SPY_Vol20']     = c.pct_change().rolling(20).std()
+    return out
+
+
+def add_regime(df: pd.DataFrame, spy: pd.DataFrame) -> pd.DataFrame:
+    """종목 프레임에 같은 날짜의 SPY 국면 피처를 붙인다 (휴장 불일치는 ffill)."""
+    if spy is None or spy.empty:
+        raise ValueError('SPY 국면 데이터 없음 — 모델 예측 불가')
+    aligned = spy[REGIME_FEATURES].reindex(df.index, method='ffill')
+    for col in REGIME_FEATURES:
+        df[col] = aligned[col].values
+    return df
 
 
 def add_trend_deltas(df: pd.DataFrame) -> pd.DataFrame:
@@ -84,6 +118,9 @@ def build_dataset(tickers: list[str] | None = None,
     tickers = tickers or get_ticker_list('TRAIN')
     log = FetchLog()
     frames = []
+    spy = spy_frame(log=log)
+    if spy.empty:
+        raise RuntimeError('SPY 수집 실패 — 국면 피처를 만들 수 없습니다.')
 
     for i, t in enumerate(tickers, 1):
         raw = get_ohlcv(t, period=HISTORY_PERIOD, log=log)
@@ -91,6 +128,7 @@ def build_dataset(tickers: list[str] | None = None,
             continue
         df = add_all(raw)
         df = add_trend_deltas(df)
+        df = add_regime(df, spy)
         df['label']  = make_labels(df)
         df['ticker'] = t
         df['date']   = df.index
@@ -127,10 +165,10 @@ def _recency_weights(part: pd.DataFrame) -> np.ndarray:
     return np.where(dates >= cutoff, RECENT_WEIGHT, 1.0)
 
 
-def _fit_calibrated(train: pd.DataFrame) -> dict:
+def _fit_calibrated(train: pd.DataFrame, feat_cols: list[str] | None = None) -> dict:
     """시간순 앞 (1-CALIB_FRACTION)으로 학습, 뒤 CALIB_FRACTION으로
     isotonic 보정 + 임계값 선택. 최근 1년 샘플에 가중치 부여."""
-    feat_cols = feature_columns()
+    feat_cols = feat_cols or feature_columns()
     n_cal = max(200, int(len(train) * CALIB_FRACTION))
     fit_part, cal_part = train.iloc[:-n_cal], train.iloc[-n_cal:]
 
@@ -164,10 +202,12 @@ def _fit_calibrated(train: pd.DataFrame) -> dict:
             'threshold': threshold, 'base_rate': float(train['label'].mean())}
 
 
-def walk_forward_backtest(data: pd.DataFrame, n_folds: int = 3) -> None:
+def walk_forward_backtest(data: pd.DataFrame, n_folds: int = 3,
+                          feat_cols: list[str] | None = None,
+                          title: str = '') -> None:
     print('\n' + '═' * 68)
     print(f'  Walk-Forward 백테스트 (+{SURGE_TARGET*100:.0f}%/{SURGE_HORIZON}일 '
-          f'이진 분류, 퍼지 갭 적용)')
+          f'이진 분류, 퍼지 갭 적용){"  — " + title if title else ""}')
     print('  ⚠ 유니버스가 현재 생존 종목 목록이므로 생존 편향이 있습니다.')
     print('    절대 수치보다 base rate 대비 향상(lift)으로 해석하세요.')
     print('═' * 68)
@@ -185,7 +225,7 @@ def walk_forward_backtest(data: pd.DataFrame, n_folds: int = 3) -> None:
         if len(train) < MIN_TRAIN_ROWS or len(test) < 200:
             continue
 
-        fit = _fit_calibrated(train)
+        fit = _fit_calibrated(train, feat_cols)
         p_raw = fit['model'].predict_proba(test[fit['feat_cols']].values)[:, 1]
         p_cal = fit['iso'].predict(p_raw)
         y = test['label'].values.astype(int)
@@ -230,13 +270,17 @@ def load_model() -> dict | None:
         return pickle.load(f)
 
 
-def predict_prob(df: pd.DataFrame, loaded: dict | None = None) -> dict | None:
+def predict_prob(df: pd.DataFrame, loaded: dict | None = None,
+                 spy: pd.DataFrame | None = None) -> dict | None:
     """add_all() 적용된 DataFrame의 마지막 행에 대해 보정 확률 반환.
-    모델이 없으면 None — 호출자가 명시적으로 '모델 없음'을 표시해야 한다."""
+    모델이 없으면 None — 호출자가 명시적으로 '모델 없음'을 표시해야 한다.
+    국면 피처로 학습된 모델이면 spy(spy_frame())가 필요하다."""
     loaded = loaded or load_model()
     if loaded is None:
         return None
     df = add_trend_deltas(df.copy())
+    if any(c in loaded['feat_cols'] for c in REGIME_FEATURES):
+        df = add_regime(df, spy)
     validate_features(df, loaded['feat_cols'])
     x = df[loaded['feat_cols']].iloc[[-1]].values
     p_raw = loaded['model'].predict_proba(x)[0, 1]
@@ -258,6 +302,11 @@ def main():
     print(f'  전체 {len(data)}건  양성(+10% 도달) 비율 {pos:.1%}')
 
     print('  [2] Walk-forward 백테스트...')
+    if cmd == 'compare':
+        walk_forward_backtest(data, feat_cols=feature_columns(regime=False),
+                              title='국면 피처 제외')
+        walk_forward_backtest(data, title='국면 피처 포함')
+        return
     walk_forward_backtest(data)
 
     if cmd == 'train':
