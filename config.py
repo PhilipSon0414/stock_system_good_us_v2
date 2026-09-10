@@ -58,7 +58,7 @@ COACH_HOLD_DAYS     = 20    # 시간 정리 기한(거래일) — 모델 기한(
 COACH_MIN_ATR       = 0.04  # 코칭 대상 최소 ATR(14)/가격 — 미만은 10일 터치율 7~15%
 COACH_STOP_ATR_MULT = 3.0   # 손절폭 = ATR(14)/가격 × 배수
 COACH_STOP_MIN      = 0.07  # 손절폭 하한
-COACH_STOP_MAX      = 0.15  # 손절폭 상한
+COACH_STOP_MAX      = 0.12  # 손절폭 상한 (0.15가 20일 승률 +3%p 좋았으나 감내 한도로 0.12)
 COACH_D3_STRONG     = 0.05  # D+3 종가 +5%↑ → 강홀드 (실측 최종 적중 ~80%/92%)
 COACH_D3_HOLD       = 0.02  # D+3 종가 +2%↑ → 홀드 (실측 ~48%/80%)
 COACH_D3_CUT_ATR    = 1.5   # D+3 종가 -1.5×ATR↓ → 조기 정리 (하한 -4%)

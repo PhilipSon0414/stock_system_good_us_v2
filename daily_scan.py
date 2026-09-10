@@ -41,7 +41,7 @@ from data_fetcher import (get_ohlcv, get_info, short_signal, fmt_market_cap,
 from indicators import add_all
 from order_block import get_order_blocks, calc_trade_params
 from scorer import score_technical
-from surge_model import load_model, predict_prob, spy_frame
+from surge_model import load_model, predict_prob
 from pattern_miner import load_rules, match_rules
 from email_sender import send_report
 import tracker
@@ -85,7 +85,7 @@ def analyze_phase1(ticker: str, end_date: str | None, log: FetchLog) -> dict | N
     }
 
 
-def analyze_phase2(r: dict, model_payload: dict | None, spy: pd.DataFrame,
+def analyze_phase2(r: dict, model_payload: dict | None, spy_ret20: float | None,
                    log: FetchLog) -> dict:
     """2차: 재무/공매도 + 모델 확률 + 최종 점수."""
     info = get_info(r['ticker'], log=log)
@@ -99,7 +99,7 @@ def analyze_phase2(r: dict, model_payload: dict | None, spy: pd.DataFrame,
     pred = None
     if model_payload is not None:
         try:
-            pred = predict_prob(r['df'], loaded=model_payload, spy=spy)
+            pred = predict_prob(r['df'], loaded=model_payload)
         except Exception as e:
             print(f'  ⚠ {r["ticker"]} 모델 예측 실패: {str(e)[:60]}')
     r['pred'] = pred
@@ -111,10 +111,6 @@ def analyze_phase2(r: dict, model_payload: dict | None, spy: pd.DataFrame,
 
     # RS vs SPY (20일)
     r['rs_vs_spy'] = None
-    spy_ret20 = None
-    if len(spy) >= 21:
-        sc = spy['SPY_Close']
-        spy_ret20 = (float(sc.iloc[-1]) / float(sc.iloc[-21]) - 1) * 100
     if spy_ret20 is not None and len(r['df']) >= 21:
         c = r['df']['Close']
         stock_ret = (float(c.iloc[-1]) / float(c.iloc[-21]) - 1) * 100
@@ -356,6 +352,13 @@ def regime_note(recent: dict | None) -> str | None:
     return None
 
 
+def get_spy_ret20(end_date: str | None, log: FetchLog) -> float | None:
+    spy = get_ohlcv('SPY', period='1y', end_date=end_date, log=log)
+    if len(spy) >= 21:
+        return (float(spy['Close'].iloc[-1]) / float(spy['Close'].iloc[-21]) - 1) * 100
+    return None
+
+
 def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
     log = FetchLog()
     tickers = get_ticker_list(market)
@@ -378,11 +381,9 @@ def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
         time.sleep(0.05)
     print(f'\n  1차 통과: {len(phase1)}종목 (기술점수 {TECH_SCORE_GATE}+)')
 
-    # 2차: info + 모델 (SPY 국면 피처는 스캔당 1회 수집)
-    spy = spy_frame(scan_date, period='1y', log=log)
-    if spy.empty:
-        print('  ⚠ SPY 수집 실패 — 국면 피처 모델은 예측 불가, RS 미계산')
-    results = [analyze_phase2(r, model_payload, spy, log) for r in phase1]
+    # 2차: info + 모델
+    spy_ret20 = get_spy_ret20(scan_date, log)
+    results = [analyze_phase2(r, model_payload, spy_ret20, log) for r in phase1]
     results = [r for r in results if r['combined'] >= FINAL_MIN_SCORE]
     results.sort(key=lambda x: x['combined'], reverse=True)
     results = results[:TOP_N_REPORT]
