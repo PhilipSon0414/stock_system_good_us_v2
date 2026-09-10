@@ -11,13 +11,18 @@ v1 대비 변경점:
   4. 추격 매수 방지 강화 — 5일 +15% / 10일 +25% 이미 급등 시 강한 페널티.
      "급등 확인"이 아니라 "급등 이전"을 잡는 것이 목표.
   5. info 데이터 실패 시 0으로 조작하지 않음 — data_ok=False면 해당 항목 제외.
+  6. 실제 픽 545건(2026-07~08) 실측으로 재보정 — 기존 점수는 실현 터치율과
+     역상관이었다(상위 4분위 28%/46% vs 하위 43%/72%). 원인은 완성된
+     정배열·OBV 횡보·52주 신고가 근접 등 "저변동 우량주" 신호에 배점이
+     몰린 것. 이를 줄이고 이동 여력(ATR/가격)을 추가해 단조 관계로 복원.
 
 점수 구성 (상한 강제):
-  추세          최대 20
+  추세          최대 20  (단기 정배열 16 > 완성 정배열 8)
   거래량/수급    최대 30
   오더블록      최대 20
   셋업(수축 또는 확장 중 하나)  최대 20
   쇼트스퀴즈    최대 10
+  이동 여력(ATR) 최대 10
   페널티는 합산 후 차감, 최종 0~100 클램프
 """
 
@@ -52,12 +57,14 @@ def score_technical(df: pd.DataFrame, ob_info: dict,
     ma20_50 = _f(latest, 'MA20AboveMA50') == 1.0
     price_ok = not np.isnan(pvm20) and pvm20 >= -0.02
 
+    # 실측(픽 545건): 완성된 정배열은 10일 터치율 -16%p, MA50<200인
+    # 단기 정배열(추세 전환 초기)은 +20%p → 배점 역전
     if ma_bull and price_ok:
-        trend += 20; tags.append('정배열 (MA20>50>200, 가격 위)')
+        trend += 8;  tags.append('정배열 (MA20>50>200, 가격 위)')
     elif ma_bull:
-        trend += 6;  tags.append('정배열이나 가격이 MA20 아래')
+        trend += 3;  tags.append('정배열이나 가격이 MA20 아래')
     elif ma20_50 and price_ok:
-        trend += 12; tags.append('단기 정배열 (MA20>50)')
+        trend += 16; tags.append('단기 정배열 (MA20>50, 추세 전환 초기)')
     trend = min(20, trend)
 
     # ── 2. 거래량/수급 (최대 30) ─────────────────────────────────────────────
@@ -80,7 +87,8 @@ def score_technical(df: pd.DataFrame, ob_info: dict,
     elif not np.isnan(obv_slope) and obv_slope > 0 and not np.isnan(vr) and vr < 1.5:
         vol += 4; tags.append('거래량 증가 추세')
     if obv_div:
-        vol += 10; tags.append('★ OBV 다이버전스 — 조용한 매집')
+        # 20일 횡보 조건이라 저변동 종목에 치우침 (실측 -15%p) → 감점
+        vol += 4; tags.append('OBV 다이버전스 (횡보 매집)')
     if info and info.get('data_ok'):
         inst = info.get('inst_pct')
         if inst is not None and inst >= 80:
@@ -126,10 +134,11 @@ def score_technical(df: pd.DataFrame, ob_info: dict,
     if not np.isnan(bb_c) and bb_c >= 1.15:
         expansion += 4
     if not np.isnan(d52):
+        # 52주 신고가 근접 종목은 +10% 여력이 작다 (실측 하위 1/3 21%/45%)
         if d52 <= 0.02:
-            expansion += 8
+            expansion += 3
         elif d52 <= 0.05:
-            expansion += 5
+            expansion += 2
     if _f(latest, 'GoldenCross') == 1.0:
         expansion += 5
 
@@ -150,9 +159,23 @@ def score_technical(df: pd.DataFrame, ob_info: dict,
             elif sp >= 10:
                 squeeze = 5;  tags.append(f'공매도 {sp:.0f}%')
 
-    pts = trend + vol + obp + setup + squeeze
+    # ── 6. 이동 여력 (최대 10) — ATR(14)/가격 ──────────────────────────────
+    # 실측에서 가장 강한 단일 변수: ATR<4%는 10일 터치 12%, 4%+는 48%
+    room = 0
+    atr_rel = _f(latest, 'ATRRel')
+    if not np.isnan(atr_rel):
+        if atr_rel >= 0.06:
+            room = 10; tags.append(f'일변동 {atr_rel*100:.1f}% — +10% 도달 여력 충분')
+        elif atr_rel >= 0.045:
+            room = 7
+        elif atr_rel >= 0.035:
+            room = 3
+
+    pts = trend + vol + obp + setup + squeeze + room
 
     # ── 페널티 ───────────────────────────────────────────────────────────────
+    if not np.isnan(atr_rel) and atr_rel < 0.03:
+        pts -= 10; tags.append(f'⚠ 일변동 {atr_rel*100:.1f}% — 2~4주 내 +10% 도달 어려움')
     gain5  = _f(latest, 'Gain5D')
     gain10 = _f(latest, 'Gain10D')
     rsi    = _f(latest, 'RSI14')

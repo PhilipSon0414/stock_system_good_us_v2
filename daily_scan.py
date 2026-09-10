@@ -31,7 +31,7 @@ from pandas.tseries.offsets import BDay
 from config import (MIN_PRICE, MIN_AVG_VOLUME, TECH_SCORE_GATE, FINAL_MIN_SCORE,
                     TOP_N_REPORT, TOP_N_DETAIL, W_SCORE, W_MODEL,
                     SURGE_TARGET, SURGE_HORIZON,
-                    COACH_HOLD_DAYS, COACH_STOP_ATR_MULT, COACH_STOP_MIN,
+                    COACH_HOLD_DAYS, COACH_MIN_ATR, COACH_STOP_ATR_MULT, COACH_STOP_MIN,
                     COACH_STOP_MAX, COACH_D3_STRONG, COACH_D3_HOLD,
                     COACH_D3_CUT_ATR, COACH_D3_CUT_MIN)
 from universe import get_ticker_list
@@ -165,11 +165,12 @@ def coaching_stop_pct(atr_rel: float | None) -> float:
 
 
 def build_coaching(results: list, elite: list, scan_date: str) -> list[dict]:
-    """1순위(엘리트픽 ∩ 전조패턴, 없으면 엘리트픽 상위) 종목의 매매 파라미터."""
+    """1순위(엘리트픽 ∩ 전조패턴, 없으면 엘리트픽 상위) 종목의 매매 파라미터.
+    ATR이 COACH_MIN_ATR 미만이면 2~4주 내 +10% 여력이 없어 코칭에서 제외."""
     elite_t = {e['ticker'] for e in elite}
-    prime = [r for r in results if r['ticker'] in elite_t and r.get('patterns')]
-    if not prime:
-        prime = [r for r in results if r['ticker'] in elite_t]
+    movable = [r for r in results
+               if r['ticker'] in elite_t and (r.get('atr_rel') or 0) >= COACH_MIN_ATR]
+    prime = [r for r in movable if r.get('patterns')] or movable
     d0 = pd.Timestamp(scan_date)
     dates = {k: (d0 + BDay(n)).strftime('%m/%d')
              for k, n in [('d3', 3), ('d10', 10), ('d20', COACH_HOLD_DAYS)]}
