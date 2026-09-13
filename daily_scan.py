@@ -34,7 +34,9 @@ from config import (MIN_PRICE, MIN_AVG_VOLUME, TECH_SCORE_GATE, FINAL_MIN_SCORE,
                     COACH_HOLD_DAYS, COACH_MIN_ATR, COACH_STOP_ATR_MULT, COACH_STOP_MIN,
                     COACH_STOP_MAX, COACH_D3_STRONG, COACH_D3_HOLD,
                     COACH_D3_CUT_ATR, COACH_D3_CUT_MIN,
-                    REGIME_WARN_HIT, REGIME_HALT_HIT)
+                    REGIME_WARN_HIT, REGIME_HALT_HIT,
+                    ELITE_MAX_ATR, ELITE_MAX_BB_EXPANSION, ELITE_MAX_DROP_20D_HIGH,
+                    ELITE_MAX_ABOVE_MA200, ELITE_EARNINGS_BLACKOUT)
 from universe import get_ticker_list
 from data_fetcher import (get_ohlcv, get_info, short_signal, fmt_market_cap,
                           FetchLog)
@@ -75,6 +77,8 @@ def analyze_phase1(ticker: str, end_date: str | None, log: FetchLog) -> dict | N
     latest = df.iloc[-1]
     pvm = latest.get('PriceVsMA20')
     atr = latest.get('ATRRel')
+    ma200 = float(latest['MA200'])
+    high20 = float(df['High'].iloc[-20:].max())
     return {
         'ticker': ticker, 'price': close, 'df': df, 'ob': ob,
         'tech_score': tech, 'tags': tags,
@@ -82,11 +86,31 @@ def analyze_phase1(ticker: str, end_date: str | None, log: FetchLog) -> dict | N
         'vol_ratio': float(latest.get('VolRatio') or 0),
         'price_vs_ma20': round(float(pvm) * 100, 1) if pvm is not None and pvm == pvm else None,
         'gain5d': float(latest.get('Gain5D') or 0),
+        'bb_compress': _fnum(latest.get('BBCompress')),
+        'dist_20d_high': round(close / high20 - 1, 4) if high20 > 0 else None,
+        'vs_ma200': round(close / ma200 - 1, 4) if ma200 == ma200 and ma200 > 0 else None,
     }
 
 
+def _fnum(v) -> float | None:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return round(f, 4) if f == f else None
+
+
+def days_to_earnings(info: dict, scan_date: str) -> int | None:
+    """스캔일 기준 다음 실적 발표까지 달력일. 미정/과거면 None."""
+    d = (info or {}).get('earnings_date')
+    if not d:
+        return None
+    delta = (pd.Timestamp(d) - pd.Timestamp(scan_date)).days
+    return delta if delta >= 0 else None
+
+
 def analyze_phase2(r: dict, model_payload: dict | None, spy_ret20: float | None,
-                   log: FetchLog) -> dict:
+                   log: FetchLog, scan_date: str) -> dict:
     """2차: 재무/공매도 + 모델 확률 + 최종 점수."""
     info = get_info(r['ticker'], log=log)
     tech, tags = score_technical(r['df'], r['ob'], info=info)
@@ -94,6 +118,8 @@ def analyze_phase2(r: dict, model_payload: dict | None, spy_ret20: float | None,
     r['info'] = info
     r['name'] = info.get('name', r['ticker'])
     r['sector'] = info.get('sector', '')
+    r['earnings_date'] = info.get('earnings_date')
+    r['days_to_earnings'] = days_to_earnings(info, scan_date)
 
     # 급등 확률 (보정된 값). 모델 없으면 None — 조용히 0 섞지 않음.
     pred = None
@@ -130,11 +156,35 @@ def apply_gate(results: list, gate: float) -> None:
             pred['passes'] = pred['prob'] >= gate
 
 
-def get_elite_picks(results: list, model_ok: bool) -> list:
-    """확률 게이트 통과 + 과열 아님. 기술점수·공매도는 부가 사유일 뿐
+def elite_exclusions(r: dict) -> list[str]:
+    """게이트를 통과해도 엘리트에서 빼는 사유. 근거는 config 엘리트픽 제외 규칙 참고 —
+    실패군(+10% 미도달 & -3%↓)이 성공군과 갈린 지점이며 모델·기술점수가 보지 못하던 항목."""
+    out = []
+    atr = r.get('atr_rel')
+    if atr is not None and atr > ELITE_MAX_ATR:
+        out.append(f'일변동 {atr*100:.1f}% (손절 상한 {COACH_STOP_MAX*100:.0f}%가 '
+                   f'{COACH_STOP_MAX/atr:.1f}×ATR — 노이즈 손절)')
+    bb = r.get('bb_compress')
+    if bb is not None and bb >= ELITE_MAX_BB_EXPANSION:
+        out.append(f'볼린저 폭 {bb:.2f}x 이미 확장')
+    d20 = r.get('dist_20d_high')
+    if d20 is not None and d20 <= -ELITE_MAX_DROP_20D_HIGH:
+        out.append(f'20일 고점 대비 {d20*100:.0f}% 하락 중')
+    m200 = r.get('vs_ma200')
+    if m200 is not None and m200 > ELITE_MAX_ABOVE_MA200:
+        out.append(f'MA200 대비 +{m200*100:.0f}% 과이탈')
+    d = r.get('days_to_earnings')
+    if d is not None and d <= ELITE_EARNINGS_BLACKOUT:
+        out.append(f'실적 발표 D-{d} ({r["earnings_date"]})')
+    return out
+
+
+def get_elite_picks(results: list, model_ok: bool) -> tuple[list, list]:
+    """확률 게이트 통과 + 과열 아님 + 제외 규칙 없음. 기술점수·공매도는 부가 사유일 뿐
     단독으로 엘리트가 되지 못한다 (실측에서 기술점수 상위는 적중률이 낮았다).
-    모델이 없으면 기술점수 75+ 단독 기준이며 리포트에 그 사실이 표시된다."""
-    elite = []
+    모델이 없으면 기술점수 75+ 단독 기준이며 리포트에 그 사실이 표시된다.
+    반환: (엘리트 상위 10, 게이트는 통과했으나 제외된 종목 — 사유 포함)"""
+    elite, excluded = [], []
     for r in results:
         pred = r.get('pred')
         if r.get('gain5d', 0) >= 0.15:
@@ -147,11 +197,20 @@ def get_elite_picks(results: list, model_ok: bool) -> list:
             if r['tech_score'] < 75:
                 continue
             reasons = [f'기술점수 {r["tech_score"]} (모델 미학습)']
+        why_not = elite_exclusions(r)
+        if why_not:
+            excluded.append({**r, 'exclude_reasons': why_not})
+            continue
         sp = (r.get('info') or {}).get('short_pct')
         if sp is not None and sp >= 20:
             reasons.append(f'공매도 {sp:.0f}% 스퀴즈 후보')
+        d = r.get('days_to_earnings')
+        if d is not None and d <= COACH_HOLD_DAYS * 2:
+            reasons.append(f'실적 {r["earnings_date"][5:]} (D-{d})')
         elite.append({**r, 'elite_reasons': reasons})
-    return sorted(elite, key=lambda x: x['combined'], reverse=True)[:10]
+    key = lambda x: x['combined']
+    return (sorted(elite, key=key, reverse=True)[:10],
+            sorted(excluded, key=key, reverse=True))
 
 
 # ── 실전 코칭 (운용 규칙을 실제 픽 가격으로 환산) ────────────────────────────
@@ -183,6 +242,8 @@ def build_coaching(results: list, elite: list, scan_date: str) -> list[dict]:
         cut_pct = max(COACH_D3_CUT_MIN, COACH_D3_CUT_ATR * (atr or 0))
         out.append({
             'ticker': r['ticker'], 'name': r['name'], 'price': round(p, 2),
+            'earnings_date': r.get('earnings_date'),
+            'days_to_earnings': r.get('days_to_earnings'),
             'atr_pct': round((atr or 0) * 100, 1),
             'target': round(p * (1 + SURGE_TARGET), 2),
             'stop_pct': round(stop_pct * 100, 1),
@@ -203,7 +264,8 @@ def build_coaching(results: list, elite: list, scan_date: str) -> list[dict]:
 def build_report(results: list, elite: list, market: str, model_ok: bool,
                  gate_note: str, log: FetchLog, scan_date: str,
                  coaching: list[dict] | None = None,
-                 regime: str | None = None) -> str:
+                 regime: str | None = None,
+                 excluded: list | None = None) -> str:
     sep, sep2 = '═' * 70, '─' * 70
     L = [sep,
          f'  미국 주식 +{SURGE_TARGET*100:.0f}% 급등 후보 스캔 (v2)',
@@ -234,6 +296,12 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
     else:
         L.append('  ★★★ 엘리트픽: 해당 없음')
     L.append(sep2)
+    if excluded:
+        L.append(f'  ▽ 게이트 통과했으나 제외 {len(excluded)}종목 (실패군 공통 요건 — config 엘리트픽 제외 규칙)')
+        for r in excluded:
+            L.append(f'  {r["ticker"]:<7} {r["name"][:22]:<22} ${r["price"]:>9.2f}'
+                     f'  합산 {r["combined"]:>3}  | {"; ".join(r["exclude_reasons"])}')
+        L.append(sep2)
     L.append('')
 
     # 급등 전조 패턴 매치 (확정 투자 방식: 1~2주 내 급등 전조 규칙)
@@ -257,8 +325,10 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
             L.append(f'  {regime}')
             L.append(sep2)
         for c in coaching:
+            earn_s = (f'  실적 {c["earnings_date"]} (D-{c["days_to_earnings"]})'
+                      if c.get('days_to_earnings') is not None else '  실적 미정')
             L.append(f'  ▸ {c["ticker"]} {c["name"][:24]} — 현재가 ${c["price"]:.2f}'
-                     f'  (ATR {c["atr_pct"]:.1f}%)')
+                     f'  (ATR {c["atr_pct"]:.1f}%){earn_s}')
             L.append(f'      매수 시 동시 주문: 목표 ${c["target"]:.2f} (+{SURGE_TARGET*100:.0f}% GTC 지정가)'
                      f' | 손절 ${c["stop"]:.2f} (-{c["stop_pct"]:.1f}% = 3×ATR)')
             L.append(f'      D+3({c["d3"]}) 종가 점검: ${c["d3_strong"]:.2f}↑ 강홀드(적중~80%)'
@@ -269,7 +339,8 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
                      f' → 손절 유지, D+{c["hold_days"]}({c["d20"]}) 정리')
         L.append(sep2)
         L.append('  ※ 손절폭이 넓으므로 종목당 자금 = 총자금 1~1.5% ÷ 손절폭(예: 손절 12% → 10%).')
-        L.append('  ※ 보유 4주 내 실적 발표 여부 확인.')
+        L.append(f'  ※ 실적 발표 {ELITE_EARNINGS_BLACKOUT}일 내 종목은 엘리트에서 자동 제외됨 —'
+                 ' 그 이후 날짜라도 보유 중 발표면 발표 전 정리 고려.')
         L.append('')
 
     # 전체 순위
@@ -383,7 +454,8 @@ def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
 
     # 2차: info + 모델
     spy_ret20 = get_spy_ret20(scan_date, log)
-    results = [analyze_phase2(r, model_payload, spy_ret20, log) for r in phase1]
+    date_str = scan_date or datetime.now().strftime('%Y-%m-%d')
+    results = [analyze_phase2(r, model_payload, spy_ret20, log, date_str) for r in phase1]
     results = [r for r in results if r['combined'] >= FINAL_MIN_SCORE]
     results.sort(key=lambda x: x['combined'], reverse=True)
     results = results[:TOP_N_REPORT]
@@ -417,11 +489,11 @@ def main(market: str = 'ALL', scan_date: str | None = None):
     if model_ok:
         apply_gate(results, gate)
 
-    elite = get_elite_picks(results, model_ok)
+    elite, excluded = get_elite_picks(results, model_ok)
     coaching = build_coaching(results, elite, date_str)
     regime = regime_note(tracker.recent_performance())
     report = build_report(results, elite, market, model_ok, gate_note, log,
-                          date_str, coaching, regime)
+                          date_str, coaching, regime, excluded)
     print('\n' + report)
 
     # 저장 (텍스트 리포트 + 요약 이메일용 JSON)
@@ -440,7 +512,13 @@ def main(market: str = 'ALL', scan_date: str | None = None):
             'vol_ratio': r['vol_ratio'], 'price_vs_ma20': r.get('price_vs_ma20'),
             'rs_vs_spy': r.get('rs_vs_spy'), 'sector': r.get('sector', ''),
             'short_pct': (r.get('info') or {}).get('short_pct'),
+            'earnings_date': r.get('earnings_date'),
+            'days_to_earnings': r.get('days_to_earnings'),
+            'bb_compress': r.get('bb_compress'), 'dist_20d_high': r.get('dist_20d_high'),
+            'vs_ma200': r.get('vs_ma200'),
             'elite': any(e['ticker'] == r['ticker'] for e in elite),
+            'elite_excluded': next((e['exclude_reasons'] for e in excluded
+                                    if e['ticker'] == r['ticker']), []),
             'patterns': [m['name'] for m in r.get('patterns', [])],
         } for r in results],
     }
@@ -455,6 +533,9 @@ def main(market: str = 'ALL', scan_date: str | None = None):
         'tech_score': r['tech_score'], 'combined': r['combined'],
         'atr_rel': r.get('atr_rel'),
         'stop_pct': round(coaching_stop_pct(r.get('atr_rel')), 4),
+        'bb_compress': r.get('bb_compress'), 'dist_20d_high': r.get('dist_20d_high'),
+        'vs_ma200': r.get('vs_ma200'), 'days_to_earnings': r.get('days_to_earnings'),
+        'elite': any(e['ticker'] == r['ticker'] for e in elite),
     } for r in results], scan_date=date_str)
 
     # 이메일

@@ -18,7 +18,7 @@ v1 대비 변경점:
 
 import time
 import warnings
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 warnings.filterwarnings('ignore')
 
@@ -138,7 +138,7 @@ def _chart_ohlcv(ticker: str, period: str, end_date: str | None) -> pd.DataFrame
 
 def _quote_summary(ticker: str) -> dict:
     """/v10/finance/quoteSummary 기반 재무·공매도·기관 (crumb 인증)."""
-    modules = 'defaultKeyStatistics,summaryProfile,price,summaryDetail'
+    modules = 'defaultKeyStatistics,summaryProfile,price,summaryDetail,calendarEvents'
     for refresh in (False, True):
         crumb = _get_crumb(refresh=refresh)
         if crumb is None:
@@ -159,6 +159,21 @@ def _raw(d: dict, *keys):
     for k in keys:
         cur = cur.get(k, {}) if isinstance(cur, dict) else {}
     return cur.get('raw') if isinstance(cur, dict) else None
+
+
+def _epoch_to_date(ts) -> str | None:
+    try:
+        return (datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime('%Y-%m-%d')
+                if ts else None)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _next_earnings(qs: dict) -> tuple[str | None, bool]:
+    """quoteSummary calendarEvents → (가장 이른 실적 발표일, 추정치 여부)."""
+    ev = (qs.get('calendarEvents') or {}).get('earnings') or {}
+    dates = [d.get('fmt') for d in ev.get('earningsDate') or [] if d.get('fmt')]
+    return (min(dates) if dates else None), bool(ev.get('isEarningsDateEstimate'))
 
 
 # ── 공개 API ─────────────────────────────────────────────────────────────────
@@ -224,6 +239,7 @@ def get_info(ticker: str, log: FetchLog | None = None) -> dict:
         'name': ticker, 'sector': '', 'industry': '',
         'market_cap': 0, 'pe_ratio': None,
         'short_pct': None, 'inst_pct': None,
+        'earnings_date': None, 'earnings_estimate': False,
     }
 
     # 1차: yfinance
@@ -244,6 +260,8 @@ def get_info(ticker: str, log: FetchLog | None = None) -> dict:
                 'pe_ratio':   info.get('trailingPE'),
                 'short_pct':  short * 100 if short is not None else None,
                 'inst_pct':   inst * 100 if inst is not None else None,
+                'earnings_date': _epoch_to_date(info.get('earningsTimestampStart')
+                                                or info.get('earningsTimestamp')),
             })
             return result
     except Exception:
@@ -256,6 +274,7 @@ def get_info(ticker: str, log: FetchLog | None = None) -> dict:
         price = qs.get('price', {}) or {}
         short = _raw(qs, 'defaultKeyStatistics', 'shortPercentOfFloat')
         inst  = _raw(qs, 'defaultKeyStatistics', 'heldPercentInstitutions')
+        earn_date, earn_est = _next_earnings(qs)
         result.update({
             'data_ok':    True,
             'name':       price.get('longName') or ticker,
@@ -265,6 +284,7 @@ def get_info(ticker: str, log: FetchLog | None = None) -> dict:
             'pe_ratio':   _raw(qs, 'summaryDetail', 'trailingPE'),
             'short_pct':  short * 100 if short is not None else None,
             'inst_pct':   inst * 100 if inst is not None else None,
+            'earnings_date': earn_date, 'earnings_estimate': earn_est,
         })
         time.sleep(0.1)
     except Exception:

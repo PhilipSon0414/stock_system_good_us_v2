@@ -44,7 +44,9 @@ RULE_OUTCOMES = ('target', 'stop', 'time')
 
 
 def save_predictions(rows: list[dict], scan_date: str) -> int:
-    """rows: [{ticker, close, prob, tech_score, combined, atr_rel, stop_pct}, ...]"""
+    """rows: [{ticker, close, prob, tech_score, combined, atr_rel, stop_pct,
+              bb_compress, dist_20d_high, vs_ma200, days_to_earnings, elite}, ...]
+    엘리트 여부·제외 규칙 피처를 함께 남겨 이후 실측 분석이 재구성 없이 가능하게 한다."""
     path = PRED_DIR / f'preds_{scan_date}.jsonl'
     with open(path, 'w', encoding='utf-8') as f:
         for r in rows:
