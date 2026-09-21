@@ -20,11 +20,13 @@ v1 대비 변경점:
 """
 
 import json
+import math
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from pandas.tseries.offsets import BDay
 
@@ -32,8 +34,12 @@ from config import (MIN_PRICE, MIN_AVG_VOLUME, TECH_SCORE_GATE, FINAL_MIN_SCORE,
                     TOP_N_REPORT, TOP_N_DETAIL, W_SCORE, W_MODEL,
                     SURGE_TARGET, SURGE_HORIZON,
                     COACH_HOLD_DAYS, COACH_MIN_ATR, COACH_STOP_ATR_MULT, COACH_STOP_MIN,
-                    COACH_STOP_MAX, COACH_D3_STRONG, COACH_D3_HOLD,
+                    COACH_STOP_MAX, COACH_TARGET, COACH_D3_STRONG, COACH_D3_HOLD,
                     COACH_D3_CUT_ATR, COACH_D3_CUT_MIN,
+                    PORTFOLIO_MAX_POSITIONS, PORTFOLIO_RISK_PER_TRADE,
+                    PORTFOLIO_MAX_DEPLOY, PORTFOLIO_MAX_CORR,
+                    PORTFOLIO_CORR_LOOKBACK, PORTFOLIO_REGIME_SCALE,
+                    PORTFOLIO_MIN_ELITE_N,
                     REGIME_WARN_HIT, REGIME_HALT_HIT,
                     ELITE_MAX_ATR, ELITE_MAX_BB_EXPANSION, ELITE_MAX_DROP_20D_HIGH,
                     ELITE_MAX_ABOVE_MA200, ELITE_EARNINGS_BLACKOUT)
@@ -245,7 +251,7 @@ def build_coaching(results: list, elite: list, scan_date: str) -> list[dict]:
             'earnings_date': r.get('earnings_date'),
             'days_to_earnings': r.get('days_to_earnings'),
             'atr_pct': round((atr or 0) * 100, 1),
-            'target': round(p * (1 + SURGE_TARGET), 2),
+            'target': round(p * (1 + COACH_TARGET), 2),
             'stop_pct': round(stop_pct * 100, 1),
             'stop': round(p * (1 - stop_pct), 2),
             'd3_strong': round(p * (1 + COACH_D3_STRONG), 2),
@@ -259,13 +265,179 @@ def build_coaching(results: list, elite: list, scan_date: str) -> list[dict]:
     return out
 
 
+# ── 포트폴리오 운용안 ────────────────────────────────────────────────────────
+
+def _avg_pairwise_corr(picks: list[dict]) -> float | None:
+    """선택된 픽들의 최근 일간수익 평균 상호상관. 분산효과 추정에 쓴다."""
+    closes = {p['ticker']: p['df']['Close'].tail(PORTFOLIO_CORR_LOOKBACK + 1)
+              for p in picks if len(p['df']) > PORTFOLIO_CORR_LOOKBACK}
+    if len(closes) < 2:
+        return None
+    rets = pd.DataFrame(closes).pct_change().dropna()
+    if len(rets) < 20:
+        return None
+    c = rets.corr().values
+    iu = np.triu_indices_from(c, 1)
+    vals = c[iu]
+    return float(np.nanmean(vals)) if np.isfinite(vals).any() else None
+
+
+def select_positions(elite: list[dict]) -> tuple[list[dict], list[dict]]:
+    """엘리트픽에서 실제로 담을 종목을 고른다 — 합산 상위부터, 이미 고른 종목과
+    상관 PORTFOLIO_MAX_CORR 이상이면 중복으로 보고 건너뛴다.
+    (상관 0.7+ 두 종목은 사실상 한 종목이라 분산 효과가 없다)
+    반환: (선택, 상관중복으로 제외 — 사유 포함)"""
+    chosen, dropped = [], []
+    for r in elite:
+        if len(chosen) >= PORTFOLIO_MAX_POSITIONS:
+            break
+        dup = None
+        if len(r['df']) > PORTFOLIO_CORR_LOOKBACK:
+            for c in chosen:
+                rho = _avg_pairwise_corr([r, c])
+                if rho is not None and rho >= PORTFOLIO_MAX_CORR:
+                    dup = (c['ticker'], rho)
+                    break
+        if dup:
+            dropped.append({**r, 'dup_with': dup[0], 'dup_corr': round(dup[1], 2)})
+        else:
+            chosen.append(r)
+    return chosen, dropped
+
+
+def build_portfolio(elite: list[dict], regime: str,
+                    exp: dict | None) -> dict | None:
+    """자산의 몇 %를 몇 종목에 넣을지 + 그때의 기대수익 추정.
+
+    비중: 종목당 손실이 총자산의 PORTFOLIO_RISK_PER_TRADE를 넘지 않게
+          비중 = 리스크한도 / 손절폭. 손절폭이 넓을수록 비중이 작아져
+          건당 손실액은 손절폭과 무관하게 일정하다.
+    기대수익: 건당 실측 분포(exp)를 종목 수와 실제 상관으로 포트폴리오 단위로 환산.
+    """
+    if not elite:
+        return None
+    scale = PORTFOLIO_REGIME_SCALE.get(regime, 1.0)
+    if scale <= 0:
+        # 신규 진입 보류 국면 — 배분표를 내는 것 자체가 잘못된 신호다
+        return {'regime': regime, 'regime_scale': scale, 'n_positions': 0,
+                'positions': [], 'deploy': 0.0, 'cash': 1.0,
+                'dropped_correlated': [], 'max_loss': 0.0, 'avg_corr': None}
+    chosen, dropped = select_positions(elite)
+    if not chosen:
+        return None
+
+    rows, deploy = [], 0.0
+    for r in chosen:
+        stop_pct = coaching_stop_pct(r.get('atr_rel'))
+        weight = PORTFOLIO_RISK_PER_TRADE / stop_pct * scale
+        deploy += weight
+        rows.append({'ticker': r['ticker'], 'name': r['name'],
+                     'price': round(r['price'], 2),
+                     'weight': round(weight, 4),
+                     'target': round(r['price'] * (1 + COACH_TARGET), 2),
+                     'stop': round(r['price'] * (1 - stop_pct), 2),
+                     'stop_pct': round(stop_pct * 100, 1),
+                     'loss_if_stopped': round(weight * stop_pct, 4)})
+
+    # 총 투입 상한을 넘으면 전 종목을 같은 비율로 축소
+    cap = PORTFOLIO_MAX_DEPLOY * scale
+    if deploy > cap > 0:
+        shrink = cap / deploy
+        for row in rows:
+            row['weight'] = round(row['weight'] * shrink, 4)
+            row['loss_if_stopped'] = round(row['loss_if_stopped'] * shrink, 4)
+        deploy = cap
+
+    out = {'regime': regime, 'regime_scale': scale,
+           'n_positions': len(rows), 'positions': rows,
+           'deploy': round(deploy, 4), 'cash': round(max(0.0, 1 - deploy), 4),
+           'dropped_correlated': [{'ticker': d['ticker'], 'dup_with': d['dup_with'],
+                                   'corr': d['dup_corr']} for d in dropped],
+           'max_loss': round(sum(r['loss_if_stopped'] for r in rows), 4)}
+
+    rho = _avg_pairwise_corr(chosen)
+    out['avg_corr'] = round(rho, 2) if rho is not None else None
+    if exp and exp.get('avg_return') is not None:
+        n = len(rows)
+        r_ = rho if rho is not None else 0.3
+        # 균등분산 포트폴리오의 변동성: 상관이 높을수록 축소 효과가 줄어든다
+        sd = exp.get('std_return')
+        cyc_sd = (sd * math.sqrt((1 + (n - 1) * r_) / n)) if sd else None
+        m_dep = exp['avg_return']
+        out['expected'] = {
+            'source': exp['source'], 'n_samples': exp['n'],
+            'horizon_days': exp['horizon'],
+            'per_trade': round(m_dep, 4),
+            'on_deployed': round(m_dep, 4),
+            'on_total': round(m_dep * deploy, 4),
+            'band80_deployed': ([round(m_dep - 1.28 * cyc_sd, 4),
+                                 round(m_dep + 1.28 * cyc_sd, 4)]
+                                if cyc_sd else None),
+            'p_gain5_deployed': (round(1 - _norm_cdf((0.05 - m_dep) / cyc_sd), 3)
+                                 if cyc_sd else None),
+            'cycles_to_5pct_total': (round(math.log(1.05) / math.log(1 + m_dep * deploy), 1)
+                                     if m_dep * deploy > 0 else None),
+        }
+    return out
+
+
+def _norm_cdf(z: float) -> float:
+    return 0.5 * (1 + math.erf(z / math.sqrt(2)))
+
+
 # ── 리포트 ───────────────────────────────────────────────────────────────────
+
+def _portfolio_lines(p: dict, sep2: str) -> list[str]:
+    """포트폴리오 운용안 렌더링 — 자산 대비 비중과 기대수익."""
+    L = [f'  [ 포트폴리오 운용안 — 총자산 대비 배분 (최대 {PORTFOLIO_MAX_POSITIONS}종목) ]',
+         sep2]
+    tag = {'normal': '정상', 'warn': '주의(절반 축소)', 'halt': '악화(신규 보류)'}
+    L.append(f'  국면 {tag.get(p["regime"], p["regime"])} → 배분 배수 {p["regime_scale"]:.0%}'
+             + (f'  |  픽 간 평균 상관 {p["avg_corr"]:.2f}'
+                if p.get('avg_corr') is not None else ''))
+    if not p['positions']:
+        L.append('  ⛔ 신규 진입 보류 — 투입 0%, 전액 현금. 보유분은 손절만 유지하십시오.')
+        L.append(sep2)
+        return L
+    L.append(f'  {"티커":<7} {"비중":>6} {"매수가":>10} {"익절":>10} {"손절":>10}'
+             f' {"손절시손실":>9}')
+    for r in p['positions']:
+        L.append(f'  {r["ticker"]:<7} {r["weight"]*100:>5.1f}% ${r["price"]:>9.2f}'
+                 f' ${r["target"]:>9.2f} ${r["stop"]:>9.2f}'
+                 f'  -{r["loss_if_stopped"]*100:>4.2f}% (-{r["stop_pct"]:.1f}%)')
+    L.append(sep2)
+    L.append(f'  총 투입 {p["deploy"]*100:.1f}%  |  현금 {p["cash"]*100:.1f}%'
+             f'  |  전 종목 손절 시 총자산 -{p["max_loss"]*100:.1f}%')
+    for d in p['dropped_correlated']:
+        L.append(f'  ▽ {d["ticker"]} 제외 — {d["dup_with"]}와 상관 {d["corr"]:.2f}'
+                 ' (사실상 같은 종목, 분산 효과 없음)')
+    e = p.get('expected')
+    if e:
+        src = ('엘리트픽 실측' if e['source'] == 'elite' else '전체 픽 실측(엘리트 표본 부족)')
+        L.append(f'  기대수익({e["horizon_days"]}거래일, {src} {e["n_samples"]}건 기준):')
+        band = (f'  80% 구간 {e["band80_deployed"][0]*100:+.1f}~'
+                f'{e["band80_deployed"][1]*100:+.1f}%' if e.get('band80_deployed') else '')
+        L.append(f'     투입금 기준 {e["on_deployed"]*100:+.1f}%{band}')
+        p5 = (f'  |  투입금 +5% 이상 확률 {e["p_gain5_deployed"]:.0%}'
+              if e.get('p_gain5_deployed') is not None else '')
+        L.append(f'     총자산 기준 {e["on_total"]*100:+.2f}%{p5}')
+        if e.get('cycles_to_5pct_total'):
+            L.append(f'     → 총자산 +5%까지 약 {e["cycles_to_5pct_total"]:.1f}사이클 '
+                     f'({e["cycles_to_5pct_total"]*e["horizon_days"]:.0f}거래일) 필요')
+    L.append(sep2)
+    L.append(f'  ※ 비중 = 종목당 리스크 한도({PORTFOLIO_RISK_PER_TRADE*100:.1f}%) ÷ 손절폭.'
+             ' 손절폭을 넓히면 비중이 줄어 건당 손실액은 같다.')
+    L.append('  ※ 분산은 기대수익을 올리지 않는다 — 최악값을 줄일 뿐이다.'
+             ' 상관이 높아 5종목 이상은 실익이 없다.')
+    return L
+
 
 def build_report(results: list, elite: list, market: str, model_ok: bool,
                  gate_note: str, log: FetchLog, scan_date: str,
                  coaching: list[dict] | None = None,
                  regime: str | None = None,
-                 excluded: list | None = None) -> str:
+                 excluded: list | None = None,
+                 portfolio: dict | None = None) -> str:
     sep, sep2 = '═' * 70, '─' * 70
     L = [sep,
          f'  미국 주식 +{SURGE_TARGET*100:.0f}% 급등 후보 스캔 (v2)',
@@ -329,7 +501,7 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
                       if c.get('days_to_earnings') is not None else '  실적 미정')
             L.append(f'  ▸ {c["ticker"]} {c["name"][:24]} — 현재가 ${c["price"]:.2f}'
                      f'  (ATR {c["atr_pct"]:.1f}%){earn_s}')
-            L.append(f'      매수 시 동시 주문: 목표 ${c["target"]:.2f} (+{SURGE_TARGET*100:.0f}% GTC 지정가)'
+            L.append(f'      매수 시 동시 주문: 목표 ${c["target"]:.2f} (+{COACH_TARGET*100:.0f}% GTC 지정가)'
                      f' | 손절 ${c["stop"]:.2f} (-{c["stop_pct"]:.1f}% = 3×ATR)')
             L.append(f'      D+3({c["d3"]}) 종가 점검: ${c["d3_strong"]:.2f}↑ 강홀드(적중~80%)'
                      f' / ${c["d3_hold"]:.2f}↑ 홀드(~50%)'
@@ -338,9 +510,13 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
             L.append(f'      D+10({c["d10"]})까지 미터치면 잔여 확률 낮음(급등군 68%가 D+10 내 도달)'
                      f' → 손절 유지, D+{c["hold_days"]}({c["d20"]}) 정리')
         L.append(sep2)
-        L.append('  ※ 손절폭이 넓으므로 종목당 자금 = 총자금 1~1.5% ÷ 손절폭(예: 손절 12% → 10%).')
         L.append(f'  ※ 실적 발표 {ELITE_EARNINGS_BLACKOUT}일 내 종목은 엘리트에서 자동 제외됨 —'
                  ' 그 이후 날짜라도 보유 중 발표면 발표 전 정리 고려.')
+        L.append('')
+
+    # 포트폴리오 운용안 (자산의 몇 %를 몇 종목에)
+    if portfolio:
+        L += _portfolio_lines(portfolio, sep2)
         L.append('')
 
     # 전체 순위
@@ -409,18 +585,31 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
 
 # ── 메인 ─────────────────────────────────────────────────────────────────────
 
+def regime_state(recent: dict | None) -> str:
+    """최근 실측 터치율로 본 국면 — PORTFOLIO_REGIME_SCALE의 키."""
+    if not recent:
+        return 'normal'
+    hr = recent['hit_rate']
+    if hr < REGIME_HALT_HIT:
+        return 'halt'
+    if hr < REGIME_WARN_HIT:
+        return 'warn'
+    return 'normal'
+
+
 def regime_note(recent: dict | None) -> str | None:
     """최근 스캔 실측이 무너졌으면 코칭에 붙일 경고. 정상이면 None."""
     if not recent:
         return None
-    hr = recent['hit_rate']
+    state = regime_state(recent)
+    if state == 'normal':
+        return None
     head = (f'최근 {recent["n_scans"]}회 스캔({recent["from"]}~{recent["to"]}) '
-            f'{recent["horizon"]}일 터치율 {hr:.0%}, 규칙 승률 {recent["rule_win_rate"]:.0%}')
-    if hr < REGIME_HALT_HIT:
+            f'{recent["horizon"]}일 터치율 {recent["hit_rate"]:.0%}, '
+            f'규칙 승률 {recent["rule_win_rate"]:.0%}')
+    if state == 'halt':
         return f'⛔ {head} — 국면 악화: 신규 진입 보류, 보유분은 손절만 유지'
-    if hr < REGIME_WARN_HIT:
-        return f'⚠ {head} — 국면 주의: 종목당 자금 절반으로 축소'
-    return None
+    return f'⚠ {head} — 국면 주의: 종목당 자금 절반으로 축소'
 
 
 def get_spy_ret20(end_date: str | None, log: FetchLog) -> float | None:
@@ -491,9 +680,12 @@ def main(market: str = 'ALL', scan_date: str | None = None):
 
     elite, excluded = get_elite_picks(results, model_ok)
     coaching = build_coaching(results, elite, date_str)
-    regime = regime_note(tracker.recent_performance())
+    recent = tracker.recent_performance()
+    regime = regime_note(recent)
+    portfolio = build_portfolio(elite, regime_state(recent),
+                                tracker.rule_expectation(PORTFOLIO_MIN_ELITE_N))
     report = build_report(results, elite, market, model_ok, gate_note, log,
-                          date_str, coaching, regime, excluded)
+                          date_str, coaching, regime, excluded, portfolio)
     print('\n' + report)
 
     # 저장 (텍스트 리포트 + 요약 이메일용 JSON)
@@ -504,6 +696,7 @@ def main(market: str = 'ALL', scan_date: str | None = None):
         'gate_note': gate_note,
         'regime_note': regime,
         'coaching': coaching,
+        'portfolio': portfolio,
         'results': [{
             'ticker': r['ticker'], 'name': r['name'], 'price': r['price'],
             'combined': r['combined'], 'tech_score': r['tech_score'],

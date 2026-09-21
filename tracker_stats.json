@@ -1,21 +1,22 @@
 {
-  "updated_at": "2026-09-18T21:43:55.803046",
+  "updated_at": "2026-09-21T08:42:28.820801",
   "target": 0.1,
   "primary_horizon": 20,
   "horizons": {
     "10": {
       "n_evaluated": 653,
       "hit_rate": 0.342,
-      "avg_end_return": 0.0144,
+      "avg_end_return": 0.0141,
       "median_end_return": 0.0063,
-      "avg_max_dd": -0.0695,
+      "avg_max_dd": -0.0697,
       "rule": {
-        "win_rate": 0.487,
-        "avg_return": 0.0059,
-        "target_rate": 0.296,
-        "stop_rate": 0.374,
-        "time_rate": 0.331,
-        "stopped_before_hit": 0.135
+        "win_rate": 0.544,
+        "avg_return": 0.0111,
+        "std_return": 0.088,
+        "target_rate": 0.262,
+        "stop_rate": 0.141,
+        "time_rate": 0.597,
+        "stopped_before_hit": 0.013
       },
       "buckets": [
         {
@@ -93,21 +94,23 @@
           "n": 12,
           "hit_rate": 0.5
         }
-      ]
+      ],
+      "rule_elite": null
     },
     "20": {
       "n_evaluated": 440,
       "hit_rate": 0.53,
-      "avg_end_return": 0.0599,
+      "avg_end_return": 0.0596,
       "median_end_return": 0.0305,
-      "avg_max_dd": -0.0872,
+      "avg_max_dd": -0.0874,
       "rule": {
-        "win_rate": 0.486,
-        "avg_return": 0.0084,
-        "target_rate": 0.382,
-        "stop_rate": 0.434,
-        "time_rate": 0.184,
-        "stopped_before_hit": 0.279
+        "win_rate": 0.614,
+        "avg_return": 0.0247,
+        "std_return": 0.1005,
+        "target_rate": 0.441,
+        "stop_rate": 0.207,
+        "time_rate": 0.352,
+        "stopped_before_hit": 0.069
       },
       "buckets": [
         {
@@ -185,7 +188,8 @@
           "n": 4,
           "hit_rate": 1.0
         }
-      ]
+      ],
+      "rule_elite": null
     }
   },
   "recent": {
@@ -195,8 +199,8 @@
     "from": "2026-08-19",
     "to": "2026-09-01",
     "hit_rate": 0.281,
-    "rule_win_rate": 0.461,
-    "rule_avg_return": 0.0012
+    "rule_win_rate": 0.491,
+    "rule_avg_return": 0.0054
   },
   "n_evaluated": 440,
   "overall_hit_rate": 0.53,

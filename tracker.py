@@ -29,7 +29,8 @@ from pathlib import Path
 import numpy as np
 
 from config import (SURGE_TARGET, SURGE_HORIZON, HOLD_HORIZONS, TARGET_PRECISION,
-                    COACH_STOP_MIN, TRACKER_MIN_BUCKET_N, RECENT_SCANS)
+                    COACH_STOP_MIN, COACH_STOP_MAX, COACH_STOP_ATR_MULT,
+                    COACH_TARGET, TRACKER_MIN_BUCKET_N, RECENT_SCANS)
 from data_fetcher import get_ohlcv
 
 HERE = Path(__file__).parent
@@ -84,13 +85,44 @@ def _write_back(records: list[dict]) -> None:
                 f.write(json.dumps(r, ensure_ascii=False) + '\n')
 
 
+def _atr_rel_at(df, scan_date: str) -> float | None:
+    """스캔일 기준 ATR(14)/종가 — atr_rel이 없는 구형 레코드 백필용.
+    indicators.add_all()의 ATR14 정의(TR 14일 단순평균)와 같아야 한다."""
+    upto = df[df.index <= scan_date]
+    if len(upto) < 15:
+        return None
+    h, l, c = upto['High'], upto['Low'], upto['Close']
+    pc = c.shift(1)
+    tr = np.maximum(h - l, np.maximum((h - pc).abs(), (l - pc).abs()))
+    atr = tr.rolling(14).mean().iloc[-1]
+    close = float(c.iloc[-1])
+    if not np.isfinite(atr) or close <= 0:
+        return None
+    return round(float(atr) / close, 4)
+
+
+def _rule_params(r: dict) -> tuple[float, float]:
+    """이 레코드를 지금 규칙으로 평가할 때의 (익절폭, 손절폭).
+    손절폭은 atr_rel에서 현재 상·하한으로 매번 다시 계산한다 — COACH_STOP_MAX를
+    바꾸면 과거 레코드도 같은 규칙으로 재평가돼 통계가 섞이지 않는다.
+    atr_rel이 없는 구형 레코드는 evaluate()가 시세에서 백필하며, 그 전까지는
+    기록 당시 손절폭을 쓴다 (익절만 바뀐 혼합 평가를 피하려면 백필이 선행돼야 한다)."""
+    atr = r.get('atr_rel')
+    if atr:
+        stop = min(COACH_STOP_MAX, max(COACH_STOP_MIN, COACH_STOP_ATR_MULT * atr))
+    else:
+        stop = r.get('stop_pct') or COACH_STOP_MIN
+    return COACH_TARGET, round(float(stop), 4)
+
+
 def _eval_window(after, entry_close: float, horizon: int,
-                 stop_pct: float) -> dict | None:
+                 stop_pct: float, target: float) -> dict | None:
     """scan_date 이후 horizon 거래일 창의 실측 지표. 창이 덜 찼으면 None.
 
-    hit          : 창 내 고가가 +SURGE_TARGET 터치 (손절 무시 — 모델 라벨과 동일)
+    hit          : 창 내 고가가 +SURGE_TARGET 터치 (손절 무시 — 모델 라벨과 동일).
+                   익절폭(COACH_TARGET)과 무관하게 라벨 정의를 유지한다.
     rule_outcome : 코칭 규칙대로 매매했을 때의 결과 —
-                   D0 종가 진입, +TARGET GTC 지정가, -stop_pct 손절, 기한 종가 정리.
+                   D0 종가 진입, +target GTC 지정가, -stop_pct 손절, 기한 종가 정리.
                    같은 날 목표·손절이 모두 걸리면 손절로 간주(보수적).
     """
     win = after.head(horizon)
@@ -102,13 +134,15 @@ def _eval_window(after, entry_close: float, horizon: int,
 
     hit_days  = np.where(high >= SURGE_TARGET)[0]
     stop_days = np.where(low <= -stop_pct)[0]
+    sell_days = np.where(high >= target)[0]
     first_hit  = int(hit_days[0]) + 1 if len(hit_days) else None
     first_stop = int(stop_days[0]) + 1 if len(stop_days) else None
+    first_sell = int(sell_days[0]) + 1 if len(sell_days) else None
 
-    if first_stop is not None and (first_hit is None or first_stop <= first_hit):
+    if first_stop is not None and (first_sell is None or first_stop <= first_sell):
         outcome, rule_ret = 'stop', -stop_pct
-    elif first_hit is not None:
-        outcome, rule_ret = 'target', SURGE_TARGET
+    elif first_sell is not None:
+        outcome, rule_ret = 'target', target
     else:
         outcome, rule_ret = 'time', float(close[-1])
 
@@ -120,6 +154,7 @@ def _eval_window(after, entry_close: float, horizon: int,
             'first_stop_day': first_stop,
             'd3_close':   round(float(close[2]), 4) if len(close) >= 3 else None,
             'stop_pct':   stop_pct,
+            'rule_target': target,
             'rule_outcome': outcome,
             'rule_return':  round(float(rule_ret), 4)}
 
@@ -127,7 +162,12 @@ def _eval_window(after, entry_close: float, horizon: int,
 def _needs_eval(r: dict, horizon: int) -> bool:
     ev = r['evals'].get(f'h{horizon}')
     # 구형 평가(규칙 결과 없음)도 재평가해 백필
-    return ev is None or 'rule_outcome' not in ev
+    if ev is None or 'rule_outcome' not in ev:
+        return True
+    # 익절·손절 규칙이 바뀌었으면 과거분도 새 규칙으로 다시 평가한다.
+    # (안 하면 tracker_stats가 옛 규칙 결과와 새 규칙 결과의 혼합이 된다)
+    target, stop_pct = _rule_params(r)
+    return ev.get('rule_target') != target or ev.get('stop_pct') != stop_pct
 
 
 def _independent(done: list[dict], horizon: int) -> list[dict]:
@@ -156,6 +196,18 @@ def _buckets(done: list[dict], horizon: int) -> list[dict]:
     return out
 
 
+def _elite_rule_stats(done: list[dict], horizon: int) -> dict | None:
+    """엘리트픽으로 기록된 레코드만의 규칙 성과. 플래그가 없으면 None."""
+    sub = [r for r in done if r.get('elite')]
+    if not sub:
+        return None
+    ret = np.array([r['evals'][f'h{horizon}']['rule_return'] for r in sub], dtype=float)
+    return {'n': len(sub),
+            'win_rate':   round(float((ret > 0).mean()), 3),
+            'avg_return': round(float(ret.mean()), 4),
+            'std_return': round(float(ret.std()), 4)}
+
+
 def _recent(records: list[dict], horizon: int = 10) -> dict | None:
     """최근 RECENT_SCANS회 스캔(평가 완료분)의 실측 — 국면 악화 조기 감지용."""
     done = [r for r in records if r['evals'].get(f'h{horizon}')]
@@ -182,8 +234,11 @@ def evaluate(verbose: bool = True) -> dict | None:
     cache: dict = {}
 
     for r in records:
+        # 구형 레코드(ATR 손절 도입 전)는 손절폭을 현재 규칙으로 계산할 수 없다.
+        # 시세에서 ATR을 백필해야 익절만 바뀐 채로 평가되는 것을 막는다.
+        needs_backfill = not r.get('atr_rel') and not r.get('atr_unavailable')
         pending = [h for h in HOLD_HORIZONS if _needs_eval(r, h)]
-        if not pending:
+        if not pending and not needs_backfill:
             continue
         if datetime.strptime(r['scan_date'], '%Y-%m-%d') > prefilter:
             continue
@@ -192,11 +247,19 @@ def evaluate(verbose: bool = True) -> dict | None:
         df = cache[r['ticker']]
         if df.empty:
             continue
+        if needs_backfill:
+            atr = _atr_rel_at(df, r['scan_date'])
+            if atr:
+                r['atr_rel'] = atr
+            else:
+                r['atr_unavailable'] = True   # 재시도 루프 방지
+            pending = [h for h in HOLD_HORIZONS if _needs_eval(r, h)]
+            if not pending:
+                continue
         after = df[df.index > r['scan_date']]
-        # 구형 레코드(ATR 손절 도입 전)는 당시 규칙이던 고정 하한 손절로 평가
-        stop_pct = r.get('stop_pct') or COACH_STOP_MIN
+        target, stop_pct = _rule_params(r)
         for h in pending:
-            ev = _eval_window(after, r['close'], h, stop_pct)
+            ev = _eval_window(after, r['close'], h, stop_pct, target)
             if ev is not None:
                 r['evals'][f'h{h}'] = ev
 
@@ -239,6 +302,8 @@ def evaluate(verbose: bool = True) -> dict | None:
             'rule': {
                 'win_rate':   round(float((rule_ret > 0).mean()), 3),
                 'avg_return': round(float(rule_ret.mean()), 4),
+                # 포트폴리오 기대수익 구간 추정에 쓰는 건별 분산
+                'std_return': round(float(rule_ret.std()), 4),
                 **{f'{o}_rate': round(float((outcomes == o).mean()), 3)
                    for o in RULE_OUTCOMES},
                 # 급등(+10% 터치)했으나 그 전에 손절된 비율 — 손절폭 진단용
@@ -249,6 +314,9 @@ def evaluate(verbose: bool = True) -> dict | None:
             # 게이트 판단용 — 종목별 비겹침 창 1건 (겹침 표본은 n을 부풀린다)
             'n_independent': len(indep),
             'buckets_independent': _buckets(indep, h),
+            # 엘리트픽만 따로 — 포트폴리오 기대수익은 실제로 사는 종목군 기준이어야 한다.
+            # elite 플래그는 2026-09 이후 레코드에만 있어 표본이 쌓이는 중이다.
+            'rule_elite': _elite_rule_stats(done, h),
         }
 
     if not stats['horizons']:
@@ -314,6 +382,25 @@ def recent_performance() -> dict | None:
     """최근 RECENT_SCANS회 스캔 실측 (evaluate()가 저장한 값)."""
     stats = _load_stats()
     return (stats or {}).get('recent')
+
+
+def rule_expectation(min_elite_n: int, horizon: int = SURGE_HORIZON) -> dict | None:
+    """포트폴리오 기대수익 추정용 건당 실측 분포.
+    엘리트 표본이 min_elite_n 이상이면 엘리트 기준, 아니면 전체 픽 기준을 쓰고
+    어느 쪽을 썼는지 source로 밝힌다 (엘리트가 전체보다 평균이 높으므로
+    전체 기준을 쓰면 기대수익이 보수적으로 나온다)."""
+    hs = ((_load_stats() or {}).get('horizons') or {}).get(str(horizon))
+    if not hs:
+        return None
+    el = hs.get('rule_elite')
+    if el and el['n'] >= min_elite_n:
+        return {**el, 'source': 'elite', 'horizon': horizon}
+    rule = hs['rule']
+    return {'n': hs['n_evaluated'], 'win_rate': rule['win_rate'],
+            'avg_return': rule['avg_return'],
+            'std_return': rule.get('std_return'),
+            'source': 'all', 'horizon': horizon,
+            'elite_n': el['n'] if el else 0}
 
 
 def recommended_min_prob(default: float) -> tuple[float, str]:
