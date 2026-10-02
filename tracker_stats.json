@@ -1,21 +1,21 @@
 {
-  "updated_at": "2026-10-01T21:33:59.762428",
+  "updated_at": "2026-10-02T21:34:34.309855",
   "target": 0.1,
   "primary_horizon": 20,
   "horizons": {
     "10": {
-      "n_evaluated": 807,
-      "hit_rate": 0.361,
-      "avg_end_return": 0.0216,
-      "median_end_return": 0.0114,
-      "avg_max_dd": -0.0693,
+      "n_evaluated": 836,
+      "hit_rate": 0.368,
+      "avg_end_return": 0.0229,
+      "median_end_return": 0.0122,
+      "avg_max_dd": -0.068,
       "rule": {
-        "win_rate": 0.569,
-        "avg_return": 0.0158,
-        "std_return": 0.0878,
-        "target_rate": 0.287,
-        "stop_rate": 0.129,
-        "time_rate": 0.584,
+        "win_rate": 0.572,
+        "avg_return": 0.0171,
+        "std_return": 0.0875,
+        "target_rate": 0.293,
+        "stop_rate": 0.124,
+        "time_rate": 0.583,
         "stopped_before_hit": 0.01
       },
       "buckets": [
@@ -40,23 +40,23 @@
         {
           "prob_min": 0.35,
           "prob_max": 0.5,
-          "n": 282,
+          "n": 285,
           "hit_rate": 0.33
         },
         {
           "prob_min": 0.5,
           "prob_max": 0.65,
-          "n": 328,
-          "hit_rate": 0.439
+          "n": 351,
+          "hit_rate": 0.45
         },
         {
           "prob_min": 0.65,
           "prob_max": 1.01,
-          "n": 53,
-          "hit_rate": 0.566
+          "n": 56,
+          "hit_rate": 0.571
         }
       ],
-      "n_independent": 247,
+      "n_independent": 254,
       "buckets_independent": [
         {
           "prob_min": 0.0,
@@ -79,27 +79,27 @@
         {
           "prob_min": 0.35,
           "prob_max": 0.5,
-          "n": 74,
-          "hit_rate": 0.284
+          "n": 75,
+          "hit_rate": 0.28
         },
         {
           "prob_min": 0.5,
           "prob_max": 0.65,
-          "n": 105,
-          "hit_rate": 0.333
+          "n": 110,
+          "hit_rate": 0.355
         },
         {
           "prob_min": 0.65,
           "prob_max": 1.01,
-          "n": 16,
-          "hit_rate": 0.562
+          "n": 17,
+          "hit_rate": 0.588
         }
       ],
       "rule_elite": {
-        "n": 11,
-        "win_rate": 0.455,
-        "avg_return": -0.0202,
-        "std_return": 0.0861
+        "n": 19,
+        "win_rate": 0.579,
+        "avg_return": 0.0184,
+        "std_return": 0.09
       }
     },
     "20": {
@@ -200,12 +200,12 @@
   "recent": {
     "horizon": 10,
     "n_scans": 10,
-    "n": 262,
-    "from": "2026-08-27",
-    "to": "2026-09-15",
-    "hit_rate": 0.359,
-    "rule_win_rate": 0.603,
-    "rule_avg_return": 0.0213
+    "n": 266,
+    "from": "2026-08-28",
+    "to": "2026-09-16",
+    "hit_rate": 0.398,
+    "rule_win_rate": 0.635,
+    "rule_avg_return": 0.0289
   },
   "n_evaluated": 653,
   "overall_hit_rate": 0.487,
