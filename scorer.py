@@ -73,6 +73,8 @@ def score_technical(df: pd.DataFrame, ob_info: dict,
     vol_rec   = _f(latest, 'VolRecovery') == 1.0
     obv_div   = _f(latest, 'OBV_Diverge') == 1.0
     obv_slope = _f(latest, 'OBVSlope5')
+    vs3m      = _f(latest, 'VolSurge3M')
+    p3m       = _f(latest, 'Price3M')
 
     if not np.isnan(vr):
         if 1.5 <= vr < 3.0:
@@ -89,6 +91,15 @@ def score_technical(df: pd.DataFrame, ob_info: dict,
     if obv_div:
         # 20일 횡보 조건이라 저변동 종목에 치우침 (실측 -15%p) → 감점
         vol += 4; tags.append('OBV 다이버전스 (횡보 매집)')
+    # 3개월 거래량 급증 + 가격 정체 = 조용한 대량 매집.
+    # 실측(학습 22만 행, 20일 +10% 도달률, 기준 34.5%): 거래량 2x↑ & 3개월 가격 ±10% 내
+    # 51% (n=279, 전반 56%/후반 43%), 1.5x대는 36%로 기준과 차이 없음 → 2x부터 배점.
+    # 3x↑ & 횡보는 표본이 13건뿐이라 별도 가중하지 않는다 (과적합 방지, 소폭만).
+    if not np.isnan(vs3m) and not np.isnan(p3m) and abs(p3m) < 0.10:
+        if vs3m >= 3.0:
+            vol += 8; tags.append(f'★ 3개월 거래량 {vs3m:.1f}x 급증 + 가격 정체 ({p3m*100:+.0f}%) — 대량 매집 의심')
+        elif vs3m >= 2.0:
+            vol += 6; tags.append(f'3개월 거래량 {vs3m:.1f}x 증가 + 가격 정체 ({p3m*100:+.0f}%) — 매집 의심')
     if info and info.get('data_ok'):
         inst = info.get('inst_pct')
         if inst is not None and inst >= 80:

@@ -18,6 +18,8 @@ import pandas as pd
 
 from config import MA_PERIODS, VOLUME_AVG_PERIOD
 
+# VolSurge3M/Price3M은 add_all()이 계산하지만 모델 피처에는 넣지 않는다:
+# walk-forward 3폴드 비교에서 정밀도 +/-4%p로 엇갈려 중립(폴드 잡음 수준) → 점수(scorer)에서만 사용.
 # 모델이 사용하는 피처 목록 — add_all()이 전부 생성함을 validate_features()가 보증
 MODEL_FEATURES = [
     'VolRatio', 'VolSlope5', 'VolDecDays', 'VolRecovery',
@@ -41,6 +43,7 @@ def add_all(df: pd.DataFrame) -> pd.DataFrame:
     df = _volatility(df)
     df = _nr7_vcp(df)
     df = _obv(df)
+    df = _quiet_accumulation(df)
     df = _oscillators(df)
     df = _high_52w(df)
     return df
@@ -167,6 +170,25 @@ def _obv(df):
     price_chg20 = df['Close'].pct_change(20)
     obv_chg20   = df['OBV'].diff(20)
     df['OBV_Diverge'] = ((price_chg20 < 0.03) & (obv_chg20 > 0)).astype(float)
+    return df
+
+
+# ── 3개월 거래량 급증 + 가격 정체 (조용한 대량 매집) ─────────────────────────
+
+VOLSURGE_RECENT = 60   # 최근 구간(거래일, 약 3개월)
+VOLSURGE_PRIOR  = 60   # 비교 대상 직전 구간(거래일)
+
+
+def _quiet_accumulation(df):
+    """VolSurge3M: 최근 60일 평균 거래량 / 그 직전 60일 평균 거래량.
+    Price3M: 최근 60일 가격 변화율. 거래량은 3배로 늘었는데 가격은 제자리인
+    종목 = 대량 매집 의심. 하루 단위 거래량비(VolRatio)나 20일 OBV 다이버전스가
+    못 잡는 3개월 스케일 신호. 해당 시점까지의 데이터만 사용 (look-ahead 없음)."""
+    v = df['Volume']
+    recent = v.rolling(VOLSURGE_RECENT).mean()
+    prior  = recent.shift(VOLSURGE_RECENT)
+    df['VolSurge3M'] = (recent / prior.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
+    df['Price3M']    = df['Close'].pct_change(VOLSURGE_RECENT)
     return df
 
 
