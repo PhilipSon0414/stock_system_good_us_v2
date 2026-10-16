@@ -29,7 +29,8 @@ v1 대비 변경점:
 import numpy as np
 import pandas as pd
 
-from config import OVERHEAT_GAIN_5D, OVERHEAT_GAIN_10D
+from config import (OVERHEAT_GAIN_5D, OVERHEAT_GAIN_10D,
+                    QUIET_VOL_MIN, QUIET_VOL_STRONG, QUIET_PRICE_BAND)
 
 
 def _f(latest: pd.Series, col: str, default: float = np.nan) -> float:
@@ -95,10 +96,10 @@ def score_technical(df: pd.DataFrame, ob_info: dict,
     # 실측(학습 22만 행, 20일 +10% 도달률, 기준 34.5%): 거래량 2x↑ & 3개월 가격 ±10% 내
     # 51% (n=279, 전반 56%/후반 43%), 1.5x대는 36%로 기준과 차이 없음 → 2x부터 배점.
     # 3x↑ & 횡보는 표본이 13건뿐이라 별도 가중하지 않는다 (과적합 방지, 소폭만).
-    if not np.isnan(vs3m) and not np.isnan(p3m) and abs(p3m) < 0.10:
-        if vs3m >= 3.0:
+    if not np.isnan(vs3m) and not np.isnan(p3m) and abs(p3m) < QUIET_PRICE_BAND:
+        if vs3m >= QUIET_VOL_STRONG:
             vol += 8; tags.append(f'★ 3개월 거래량 {vs3m:.1f}x 급증 + 가격 정체 ({p3m*100:+.0f}%) — 대량 매집 의심')
-        elif vs3m >= 2.0:
+        elif vs3m >= QUIET_VOL_MIN:
             vol += 6; tags.append(f'3개월 거래량 {vs3m:.1f}x 증가 + 가격 정체 ({p3m*100:+.0f}%) — 매집 의심')
     if info and info.get('data_ok'):
         inst = info.get('inst_pct')

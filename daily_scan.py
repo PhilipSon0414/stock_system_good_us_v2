@@ -40,6 +40,7 @@ from config import (MIN_PRICE, MIN_AVG_VOLUME, TECH_SCORE_GATE, FINAL_MIN_SCORE,
                     PORTFOLIO_MAX_DEPLOY, PORTFOLIO_MAX_CORR,
                     PORTFOLIO_CORR_LOOKBACK, PORTFOLIO_REGIME_SCALE,
                     PORTFOLIO_MIN_ELITE_N,
+                    QUIET_VOL_MIN, QUIET_VOL_STRONG, QUIET_PRICE_BAND,
                     REGIME_WARN_HIT, REGIME_HALT_HIT,
                     ELITE_MAX_ATR, ELITE_MAX_BB_EXPANSION, ELITE_MAX_DROP_20D_HIGH,
                     ELITE_MAX_ABOVE_MA200, ELITE_EARNINGS_BLACKOUT)
@@ -61,7 +62,8 @@ REPORTS_DIR.mkdir(exist_ok=True)
 
 # ── 단일 종목 분석 ───────────────────────────────────────────────────────────
 
-def analyze_phase1(ticker: str, end_date: str | None, log: FetchLog) -> dict | None:
+def analyze_phase1(ticker: str, end_date: str | None, log: FetchLog,
+                   quiet: list | None = None) -> dict | None:
     """1차: 가격/유동성 필터 + 기술 점수. info/모델은 아직 안 씀."""
     df = get_ohlcv(ticker, period='2y', end_date=end_date, log=log)
     if len(df) < 260:
@@ -74,6 +76,16 @@ def analyze_phase1(ticker: str, end_date: str | None, log: FetchLog) -> dict | N
     avg_vol = float(df['VolMA'].iloc[-1]) if df['VolMA'].notna().iloc[-1] else 0
     if avg_vol < MIN_AVG_VOLUME:
         return None
+
+    # 조용한 매집은 기술점수 게이트와 무관하게 별도 목록으로 수집 (게이트 미달 종목도 대상)
+    latest0 = df.iloc[-1]
+    vs3m, p3m = _fnum(latest0.get('VolSurge3M')), _fnum(latest0.get('Price3M'))
+    if (quiet is not None and vs3m is not None and p3m is not None
+            and vs3m >= QUIET_VOL_MIN and abs(p3m) < QUIET_PRICE_BAND):
+        quiet.append({'ticker': ticker, 'price': close, 'df': df,
+                      'vol_surge_3m': vs3m, 'price_3m': p3m,
+                      'vol_ratio': _fnum(latest0.get('VolRatio')),
+                      'atr_rel': _fnum(latest0.get('ATRRel'))})
 
     ob = get_order_blocks(df)
     tech, tags = score_technical(df, ob, info=None)
@@ -437,7 +449,8 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
                  coaching: list[dict] | None = None,
                  regime: str | None = None,
                  excluded: list | None = None,
-                 portfolio: dict | None = None) -> str:
+                 portfolio: dict | None = None,
+                 quiet: list | None = None) -> str:
     sep, sep2 = '═' * 70, '─' * 70
     L = [sep,
          f'  미국 주식 +{SURGE_TARGET*100:.0f}% 급등 후보 스캔 (v2)',
@@ -488,6 +501,28 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
             L.append(f'  {r["ticker"]:<7} {r["name"][:22]:<22} {names}')
         L.append(sep2)
         L.append('')
+
+    # 조용한 매집 (3개월 거래량 급증 + 가격 정체) — 기술점수 게이트와 무관한 별도 목록
+    L.append(sep)
+    if quiet:
+        L.append(f'  ◆ 조용한 매집 종목 (최근 60일 거래량이 직전 60일 대비 {QUIET_VOL_MIN:.0f}x↑'
+                 f' + 60일 가격 ±{QUIET_PRICE_BAND*100:.0f}% 이내)')
+        L.append(sep2)
+        for q in quiet:
+            prob_s = f'{q["prob"]:.0%}' if q.get('prob') is not None else '—'
+            earn = q.get('days_to_earnings')
+            earn_s = f' | 실적 D-{earn}' if earn is not None else ''
+            mark = '★' if q['strong'] else ' '
+            tag = '' if q['in_results'] else ' | 기술점수 게이트 미달(후보 목록 밖)'
+            L.append(f'  {mark}{q["ticker"]:<7} {q["name"][:22]:<22} ${q["price"]:>9.2f}'
+                     f'  거래량 {q["vol_surge_3m"]:.1f}x  가격 {q["price_3m"]*100:+.1f}%'
+                     f'  기술 {q["tech_score"]:>3}  확률 {prob_s:>4}{earn_s}{tag}')
+        L.append(sep2)
+        L.append('  ※ 실측(20일 +10% 도달): 2x↑&횡보 약 51%(기준 34%), 3x↑는 표본 부족. 신호가 약해지는 추세라 단독 매수 근거 금지.')
+    else:
+        L.append('  ◆ 조용한 매집 종목: 해당 없음')
+    L.append(sep2)
+    L.append('')
 
     # 실전 코칭 (운용 규칙 — 실제 픽 실측 기반, config.py 코칭 섹션)
     if coaching:
@@ -632,8 +667,9 @@ def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
 
     # 1차: 기술 게이트
     phase1 = []
+    quiet = []
     for i, t in enumerate(tickers, 1):
-        r = analyze_phase1(t, scan_date, log)
+        r = analyze_phase1(t, scan_date, log, quiet)
         if r:
             phase1.append(r)
         if i % 20 == 0 or i == len(tickers):
@@ -654,15 +690,38 @@ def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
     for r in results:
         r['patterns'] = match_rules(r['df'], pat_rules) if pat_rules else []
 
-    return results, model_payload is not None, log
+    # 조용한 매집 종목: 이름 + (모델 있으면) 확률 + 기술점수 보강
+    quiet_out = []
+    for q in sorted(quiet, key=lambda x: x['vol_surge_3m'], reverse=True):
+        info = get_info(q['ticker'], log=log)
+        pred = None
+        if model_payload is not None:
+            try:
+                pred = predict_prob(q['df'], loaded=model_payload)
+            except Exception:
+                pred = None
+        tech, _ = score_technical(q['df'], get_order_blocks(q['df']), info=info)
+        quiet_out.append({
+            'ticker': q['ticker'], 'name': info.get('name', q['ticker']),
+            'price': q['price'], 'vol_surge_3m': round(q['vol_surge_3m'], 2),
+            'price_3m': round(q['price_3m'], 4), 'vol_ratio': q['vol_ratio'],
+            'strong': q['vol_surge_3m'] >= QUIET_VOL_STRONG,
+            'tech_score': tech, 'prob': (pred or {}).get('prob'),
+            'in_results': any(r['ticker'] == q['ticker'] for r in results),
+            'days_to_earnings': days_to_earnings(info, date_str),
+        })
+
+    return results, model_payload is not None, log, quiet_out
 
 
 def main(market: str = 'ALL', scan_date: str | None = None):
-    results, model_ok, log = run_scan(market, scan_date)
+    results, model_ok, log, quiet = run_scan(market, scan_date)
     date_str = scan_date or datetime.now().strftime('%Y-%m-%d')
 
     if not results:
         print('  발굴 종목 없음.')
+        if quiet:
+            print(f'  (조용한 매집 {len(quiet)}종목: ' + ', '.join(q['ticker'] for q in quiet) + ')')
         for line in log.summary_lines():
             print(line)
         return
@@ -685,7 +744,7 @@ def main(market: str = 'ALL', scan_date: str | None = None):
     portfolio = build_portfolio(elite, regime_state(recent),
                                 tracker.rule_expectation(PORTFOLIO_MIN_ELITE_N))
     report = build_report(results, elite, market, model_ok, gate_note, log,
-                          date_str, coaching, regime, excluded, portfolio)
+                          date_str, coaching, regime, excluded, portfolio, quiet)
     print('\n' + report)
 
     # 저장 (텍스트 리포트 + 요약 이메일용 JSON)
@@ -697,6 +756,7 @@ def main(market: str = 'ALL', scan_date: str | None = None):
         'regime_note': regime,
         'coaching': coaching,
         'portfolio': portfolio,
+        'quiet_accumulation': quiet,
         'results': [{
             'ticker': r['ticker'], 'name': r['name'], 'price': r['price'],
             'combined': r['combined'], 'tech_score': r['tech_score'],
