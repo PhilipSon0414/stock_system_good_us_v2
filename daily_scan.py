@@ -41,6 +41,7 @@ from config import (MIN_PRICE, MIN_AVG_VOLUME, TECH_SCORE_GATE, FINAL_MIN_SCORE,
                     PORTFOLIO_CORR_LOOKBACK, PORTFOLIO_REGIME_SCALE,
                     PORTFOLIO_MIN_ELITE_N,
                     QUIET_VOL_MIN, QUIET_VOL_STRONG, QUIET_PRICE_BAND,
+                    QUIET_BOX_MIN, QUIET_UPDN_MIN,
                     REGIME_WARN_HIT, REGIME_HALT_HIT,
                     ELITE_MAX_ATR, ELITE_MAX_BB_EXPANSION, ELITE_MAX_DROP_20D_HIGH,
                     ELITE_MAX_ABOVE_MA200, ELITE_EARNINGS_BLACKOUT)
@@ -54,6 +55,7 @@ from surge_model import load_model, predict_prob
 from pattern_miner import load_rules, match_rules
 from email_sender import send_report
 import tracker
+import quiet_tracker
 
 HERE = Path(__file__).parent
 REPORTS_DIR = HERE / 'reports'
@@ -85,7 +87,9 @@ def analyze_phase1(ticker: str, end_date: str | None, log: FetchLog,
         quiet.append({'ticker': ticker, 'price': close, 'df': df,
                       'vol_surge_3m': vs3m, 'price_3m': p3m,
                       'vol_ratio': _fnum(latest0.get('VolRatio')),
-                      'atr_rel': _fnum(latest0.get('ATRRel'))})
+                      'atr_rel': _fnum(latest0.get('ATRRel')),
+                      'box_pos': _fnum(latest0.get('BoxPos60')),
+                      'updn_vol': _fnum(latest0.get('UpDnVol60'))})
 
     ob = get_order_blocks(df)
     tech, tags = score_technical(df, ob, info=None)
@@ -513,11 +517,15 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
             earn = q.get('days_to_earnings')
             earn_s = f' | 실적 D-{earn}' if earn is not None else ''
             mark = '★' if q['strong'] else ' '
+            bp, ud = q.get('box_pos'), q.get('updn_vol')
+            conf = (f' | 박스 {bp:.0%} 상승/하락량 {ud:.1f}x' if bp is not None and ud is not None else '')
+            conf += ' ✔확증' if q.get('confirmed') else ''
             tag = '' if q['in_results'] else ' | 기술점수 게이트 미달(후보 목록 밖)'
             L.append(f'  {mark}{q["ticker"]:<7} {q["name"][:22]:<22} ${q["price"]:>9.2f}'
                      f'  거래량 {q["vol_surge_3m"]:.1f}x  가격 {q["price_3m"]*100:+.1f}%'
-                     f'  기술 {q["tech_score"]:>3}  확률 {prob_s:>4}{earn_s}{tag}')
+                     f'  기술 {q["tech_score"]:>3}  확률 {prob_s:>4}{conf}{earn_s}{tag}')
         L.append(sep2)
+        L.append(f'  ✔확증 = 박스위치 {QUIET_BOX_MIN:.0%}↑ + 상승/하락 거래량 {QUIET_UPDN_MIN}x↑ (백테스트: 확증 시 평균 +4.6%/승률 70%, n=37 / 박스 하단은 +0.1%)')
         L.append('  ※ 실측(20일 +10% 도달): 2x↑&횡보 약 51%(기준 34%), 3x↑는 표본 부족. 신호가 약해지는 추세라 단독 매수 근거 금지.')
     else:
         L.append('  ◆ 조용한 매집 종목: 해당 없음')
@@ -706,6 +714,10 @@ def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
             'price': q['price'], 'vol_surge_3m': round(q['vol_surge_3m'], 2),
             'price_3m': round(q['price_3m'], 4), 'vol_ratio': q['vol_ratio'],
             'strong': q['vol_surge_3m'] >= QUIET_VOL_STRONG,
+            'box_pos': q.get('box_pos'), 'updn_vol': q.get('updn_vol'),
+            'confirmed': (q.get('box_pos') is not None and q.get('updn_vol') is not None
+                          and q['box_pos'] >= QUIET_BOX_MIN and q['updn_vol'] >= QUIET_UPDN_MIN),
+            'atr_rel': q.get('atr_rel'),
             'tech_score': tech, 'prob': (pred or {}).get('prob'),
             'in_results': any(r['ticker'] == q['ticker'] for r in results),
             'days_to_earnings': days_to_earnings(info, date_str),
@@ -717,6 +729,10 @@ def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
 def main(market: str = 'ALL', scan_date: str | None = None):
     results, model_ok, log, quiet = run_scan(market, scan_date)
     date_str = scan_date or datetime.now().strftime('%Y-%m-%d')
+
+    # 조용한 매집 신호 기록 + 기한 도래분 평가 (엘리트픽/후보 유무와 무관)
+    quiet_tracker.save_quiet(quiet, date_str)
+    quiet_tracker.evaluate(verbose=True)
 
     if not results:
         print('  발굴 종목 없음.')

@@ -189,6 +189,13 @@ def _quiet_accumulation(df):
     prior  = recent.shift(VOLSURGE_RECENT)
     df['VolSurge3M'] = (recent / prior.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
     df['Price3M']    = df['Close'].pct_change(VOLSURGE_RECENT)
+    # 확증 지표 (quiet_backtest.py 실측): 박스 상단 + 상승일 거래량 우위일 때만 우위가 있었다
+    c = df['Close']
+    lo, hi = c.rolling(VOLSURGE_RECENT).min(), c.rolling(VOLSURGE_RECENT).max()
+    df['BoxPos60'] = (c - lo) / (hi - lo).replace(0, np.nan)
+    up = (v * (c.diff() > 0)).rolling(VOLSURGE_RECENT).sum()
+    dn = (v * (c.diff() < 0)).rolling(VOLSURGE_RECENT).sum()
+    df['UpDnVol60'] = up / dn.replace(0, np.nan)
     return df
 
 
