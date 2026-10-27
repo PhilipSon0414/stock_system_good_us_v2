@@ -100,7 +100,7 @@ def _chart_ohlcv(ticker: str, period: str, end_date: str | None) -> pd.DataFrame
     """/v8/finance/chart 기반 OHLCV. adjclose 비율로 수정주가 반영."""
     params = {'interval': '1d', 'events': 'div,split'}
     if end_date:
-        end_dt = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+        end_dt = (pd.Timestamp(end_date, tz='America/New_York') + pd.Timedelta(days=1)).to_pydatetime()
         years  = int(period.rstrip('y')) if period.endswith('y') else 2
         start_dt = end_dt - timedelta(days=365 * years + 30)
         params['period1'] = int(start_dt.timestamp())
@@ -222,7 +222,12 @@ def get_ohlcv(ticker: str, period: str = '2y',
 
     try:
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
+        idx = pd.DatetimeIndex(df.index)
+        if idx.tz is not None:
+            idx = idx.tz_convert('America/New_York').tz_localize(None)
+        df.index = idx.normalize()
         df.index.name = 'Date'
+        df = df.sort_index()
         df = df.dropna(subset=['Close', 'Volume'])
         df = df[df['Volume'] > 0]
         return df

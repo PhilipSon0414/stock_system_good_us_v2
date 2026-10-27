@@ -1,5 +1,6 @@
 {
-  "generated_at": "2026-09-10T15:37:10.809092",
+  "schema_version": 2,
+  "generated_at": "2026-10-27T15:23:38.580818+00:00",
   "target": 0.1,
   "rules": [
     {
@@ -8,7 +9,7 @@
         {
           "feature": "Dist52WPct",
           "op": ">",
-          "value": 0.403737
+          "value": 0.403007
         },
         {
           "feature": "MA50AboveMA200",
@@ -16,12 +17,12 @@
           "value": 0.5
         }
       ],
-      "precision_holdout": 0.399,
-      "lift_holdout": 3.09,
-      "n_holdout": 1010,
+      "precision_holdout": 0.365,
+      "lift_holdout": 3.01,
+      "n_holdout": 985,
       "coverage_holdout": 0.021,
-      "precision_train": 0.439,
-      "base_holdout": 0.129,
+      "precision_train": 0.428,
+      "base_holdout": 0.121,
       "name": "H5-R1"
     },
     {
@@ -29,21 +30,21 @@
       "conditions": [
         {
           "feature": "Dist52WPct",
-          "op": ">",
-          "value": 0.402736
+          "op": "<=",
+          "value": 0.287469
         },
         {
-          "feature": "MA50AboveMA200",
+          "feature": "PriceVsMA20",
           "op": ">",
-          "value": 0.5
+          "value": 0.187289
         }
       ],
-      "precision_holdout": 0.523,
-      "lift_holdout": 2.17,
-      "n_holdout": 977,
-      "coverage_holdout": 0.021,
-      "precision_train": 0.596,
-      "base_holdout": 0.241,
+      "precision_holdout": 0.497,
+      "lift_holdout": 2.12,
+      "n_holdout": 728,
+      "coverage_holdout": 0.015,
+      "precision_train": 0.58,
+      "base_holdout": 0.235,
       "name": "H10-R1"
     },
     {
@@ -51,21 +52,21 @@
       "conditions": [
         {
           "feature": "Dist52WPct",
-          "op": "<=",
-          "value": 0.317703
+          "op": ">",
+          "value": 0.37914
         },
         {
-          "feature": "PriceVsMA20",
+          "feature": "MA50AboveMA200",
           "op": ">",
-          "value": 0.186937
+          "value": 0.5
         }
       ],
-      "precision_holdout": 0.501,
-      "lift_holdout": 2.08,
-      "n_holdout": 731,
-      "coverage_holdout": 0.015,
-      "precision_train": 0.587,
-      "base_holdout": 0.241,
+      "precision_holdout": 0.495,
+      "lift_holdout": 2.11,
+      "n_holdout": 1150,
+      "coverage_holdout": 0.024,
+      "precision_train": 0.567,
+      "base_holdout": 0.235,
       "name": "H10-R2"
     },
     {
@@ -74,7 +75,7 @@
         {
           "feature": "Dist52WPct",
           "op": ">",
-          "value": 0.557755
+          "value": 0.528104
         },
         {
           "feature": "MA50AboveMA200",
@@ -82,12 +83,12 @@
           "value": 0.5
         }
       ],
-      "precision_holdout": 0.483,
-      "lift_holdout": 2.0,
-      "n_holdout": 3092,
-      "coverage_holdout": 0.065,
-      "precision_train": 0.514,
-      "base_holdout": 0.241,
+      "precision_holdout": 0.431,
+      "lift_holdout": 1.83,
+      "n_holdout": 3882,
+      "coverage_holdout": 0.082,
+      "precision_train": 0.477,
+      "base_holdout": 0.235,
       "name": "H10-R3"
     },
     {
@@ -96,7 +97,7 @@
         {
           "feature": "Dist52WPct",
           "op": ">",
-          "value": 0.317703
+          "value": 0.287469
         },
         {
           "feature": "MA50AboveMA200",
@@ -106,15 +107,15 @@
         {
           "feature": "Dist52WPct",
           "op": "<=",
-          "value": 0.402736
+          "value": 0.37914
         }
       ],
-      "precision_holdout": 0.472,
-      "lift_holdout": 1.96,
-      "n_holdout": 961,
-      "coverage_holdout": 0.02,
-      "precision_train": 0.444,
-      "base_holdout": 0.241,
+      "precision_holdout": 0.43,
+      "lift_holdout": 1.83,
+      "n_holdout": 1415,
+      "coverage_holdout": 0.03,
+      "precision_train": 0.432,
+      "base_holdout": 0.235,
       "name": "H10-R4"
     },
     {
@@ -123,53 +124,26 @@
         {
           "feature": "Dist52WPct",
           "op": "<=",
-          "value": 0.317703
+          "value": 0.287469
         },
         {
           "feature": "PriceVsMA20",
           "op": ">",
-          "value": 0.135002
+          "value": 0.134999
         },
         {
           "feature": "PriceVsMA20",
           "op": "<=",
-          "value": 0.186937
+          "value": 0.187289
         }
       ],
-      "precision_holdout": 0.395,
-      "lift_holdout": 1.64,
-      "n_holdout": 802,
-      "coverage_holdout": 0.017,
-      "precision_train": 0.371,
-      "base_holdout": 0.241,
+      "precision_holdout": 0.382,
+      "lift_holdout": 1.63,
+      "n_holdout": 753,
+      "coverage_holdout": 0.016,
+      "precision_train": 0.354,
+      "base_holdout": 0.235,
       "name": "H10-R5"
-    },
-    {
-      "horizon": 10,
-      "conditions": [
-        {
-          "feature": "Dist52WPct",
-          "op": ">",
-          "value": 0.317703
-        },
-        {
-          "feature": "MA50AboveMA200",
-          "op": "<=",
-          "value": 0.5
-        },
-        {
-          "feature": "Dist52WPct",
-          "op": "<=",
-          "value": 0.557755
-        }
-      ],
-      "precision_holdout": 0.353,
-      "lift_holdout": 1.46,
-      "n_holdout": 7045,
-      "coverage_holdout": 0.149,
-      "precision_train": 0.32,
-      "base_holdout": 0.241,
-      "name": "H10-R6"
     }
   ]
 }

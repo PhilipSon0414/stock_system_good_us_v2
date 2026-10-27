@@ -28,7 +28,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from pandas.tseries.offsets import BDay
+from market_clock import resolve_session, completed_bars, session_offset, utc_now
+from portfolio_state import load_state
+from execution import policy
+import hashlib
+from storage import write_text
 
 from config import (MIN_PRICE, MIN_AVG_VOLUME, TECH_SCORE_GATE, FINAL_MIN_SCORE,
                     TOP_N_REPORT, TOP_N_DETAIL, W_SCORE, W_MODEL,
@@ -70,6 +74,11 @@ def analyze_phase1(ticker: str, end_date: str | None, log: FetchLog,
     df = get_ohlcv(ticker, period='2y', end_date=end_date, log=log)
     if len(df) < 260:
         return None
+    try:
+        df = completed_bars(df, end_date)
+    except ValueError as exc:
+        log.ohlcv_fail.append((ticker, str(exc)))
+        return None
     close = float(df['Close'].iloc[-1])
     if close < MIN_PRICE:
         return None
@@ -93,8 +102,7 @@ def analyze_phase1(ticker: str, end_date: str | None, log: FetchLog,
 
     ob = get_order_blocks(df)
     tech, tags = score_technical(df, ob, info=None)
-    if tech < TECH_SCORE_GATE:
-        return None
+    # Score every liquid candidate, allowing prospective strategy comparisons.
 
     latest = df.iloc[-1]
     pvm = latest.get('PriceVsMA20')
@@ -132,7 +140,7 @@ def days_to_earnings(info: dict, scan_date: str) -> int | None:
 
 
 def analyze_phase2(r: dict, model_payload: dict | None, spy_ret20: float | None,
-                   log: FetchLog, scan_date: str) -> dict:
+                   log: FetchLog, scan_date: str, trade_payload: dict | None = None) -> dict:
     """2차: 재무/공매도 + 모델 확률 + 최종 점수."""
     info = get_info(r['ticker'], log=log)
     tech, tags = score_technical(r['df'], r['ob'], info=info)
@@ -151,6 +159,12 @@ def analyze_phase2(r: dict, model_payload: dict | None, spy_ret20: float | None,
         except Exception as e:
             print(f'  ⚠ {r["ticker"]} 모델 예측 실패: {str(e)[:60]}')
     r['pred'] = pred
+    r['trade_target_prob'] = None
+    if trade_payload is not None:
+        try:
+            r['trade_target_prob'] = predict_prob(r['df'], loaded=trade_payload)['prob']
+        except (ValueError, KeyError):
+            pass
 
     if pred is not None:
         r['combined'] = round(W_SCORE * tech + W_MODEL * pred['prob'] * 100)
@@ -196,6 +210,8 @@ def elite_exclusions(r: dict) -> list[str]:
     if m200 is not None and m200 > ELITE_MAX_ABOVE_MA200:
         out.append(f'MA200 대비 +{m200*100:.0f}% 과이탈')
     d = r.get('days_to_earnings')
+    if d is None:
+        out.append('실적 발표 일정 확인 필요')
     if d is not None and d <= ELITE_EARNINGS_BLACKOUT:
         out.append(f'실적 발표 D-{d} ({r["earnings_date"]})')
     return out
@@ -207,6 +223,8 @@ def get_elite_picks(results: list, model_ok: bool) -> tuple[list, list]:
     모델이 없으면 기술점수 75+ 단독 기준이며 리포트에 그 사실이 표시된다.
     반환: (엘리트 상위 10, 게이트는 통과했으나 제외된 종목 — 사유 포함)"""
     elite, excluded = [], []
+    if not model_ok:
+        return elite, excluded
     for r in results:
         pred = r.get('pred')
         if r.get('gain5d', 0) >= 0.15:
@@ -254,7 +272,7 @@ def build_coaching(results: list, elite: list, scan_date: str) -> list[dict]:
                if r['ticker'] in elite_t and (r.get('atr_rel') or 0) >= COACH_MIN_ATR]
     prime = [r for r in movable if r.get('patterns')] or movable
     d0 = pd.Timestamp(scan_date)
-    dates = {k: (d0 + BDay(n)).strftime('%m/%d')
+    dates = {k: pd.Timestamp(session_offset(scan_date, n)).strftime('%m/%d')
              for k, n in [('d3', 3), ('d10', 10), ('d20', COACH_HOLD_DAYS)]}
     out = []
     for r in prime[:3]:
@@ -322,7 +340,8 @@ def select_positions(elite: list[dict]) -> tuple[list[dict], list[dict]]:
 
 
 def build_portfolio(elite: list[dict], regime: str,
-                    exp: dict | None) -> dict | None:
+                    exp: dict | None, state: dict | None = None,
+                    state_note: str | None = None) -> dict | None:
     """자산의 몇 %를 몇 종목에 넣을지 + 그때의 기대수익 추정.
 
     비중: 종목당 손실이 총자산의 PORTFOLIO_RISK_PER_TRADE를 넘지 않게
@@ -330,17 +349,40 @@ def build_portfolio(elite: list[dict], regime: str,
           건당 손실액은 손절폭과 무관하게 일정하다.
     기대수익: 건당 실측 분포(exp)를 종목 수와 실제 상관으로 포트폴리오 단위로 환산.
     """
-    if not elite:
-        return None
+    if state is None:
+        return {'regime': regime, 'regime_scale': 0, 'n_positions': 0,
+                'positions': [], 'deploy': 0, 'cash': None, 'max_loss': None,
+                'dropped_correlated': [], 'avg_corr': None,
+                'blocked_reason': state_note or '보유 현황 미확인'}
+    held = state['positions']
+    occupied = {p['ticker'] for p in held}
+    used = sum(p['weight'] for p in held)
+    used_risk = sum(p['weight']*p['stop_pct'] for p in held)
+    elite = [r for r in elite if r['ticker'] not in occupied]
     scale = PORTFOLIO_REGIME_SCALE.get(regime, 1.0)
     if scale <= 0:
         # 신규 진입 보류 국면 — 배분표를 내는 것 자체가 잘못된 신호다
         return {'regime': regime, 'regime_scale': scale, 'n_positions': 0,
-                'positions': [], 'deploy': 0.0, 'cash': 1.0,
-                'dropped_correlated': [], 'max_loss': 0.0, 'avg_corr': None}
-    chosen, dropped = select_positions(elite)
+                'positions': [], 'deploy': 0.0, 'cash': 1-used,
+                'dropped_correlated': [], 'max_loss': used_risk, 'avg_corr': None}
+    # Holdings without return history cannot be assumed uncorrelated.
+    held_frames = []
+    for h in held:
+        frame = get_ohlcv(h['ticker'], period='2y', end_date=state['as_of_session'])
+        try:
+            frame = completed_bars(frame, state['as_of_session'])
+        except ValueError:
+            return {'positions': [], 'blocked_reason': '보유 종목 시세 확인 실패',
+                    'n_positions': 0, 'deploy': 0, 'cash': 1-used, 'max_loss': used_risk}
+        held_frames.append({'df': frame, 'ticker': h['ticker']})
+    eligible = [r for r in elite if all(
+        (rho := _avg_pairwise_corr([r, h])) is not None and rho < PORTFOLIO_MAX_CORR
+        for h in held_frames)]
+    chosen, dropped = select_positions(eligible)
+    chosen = chosen[:max(0, PORTFOLIO_MAX_POSITIONS-len(held))]
     if not chosen:
-        return None
+        return {'positions': [], 'blocked_reason': '잔여 슬롯 또는 적격 후보 없음',
+                'n_positions': 0, 'deploy': 0, 'cash': 1-used, 'max_loss': used_risk}
 
     rows, deploy = [], 0.0
     for r in chosen:
@@ -356,7 +398,14 @@ def build_portfolio(elite: list[dict], regime: str,
                      'loss_if_stopped': round(weight * stop_pct, 4)})
 
     # 총 투입 상한을 넘으면 전 종목을 같은 비율로 축소
-    cap = PORTFOLIO_MAX_DEPLOY * scale
+    cap = max(0.0, min(1-used, PORTFOLIO_MAX_DEPLOY * scale-used))
+    remaining_risk = max(0.0, PORTFOLIO_RISK_PER_TRADE * PORTFOLIO_MAX_POSITIONS * scale-used_risk)
+    new_risk = sum(r['loss_if_stopped'] for r in rows)
+    if new_risk > 0:
+        cap = min(cap, deploy * remaining_risk/new_risk)
+    if cap <= 0:
+        return {'positions': [], 'blocked_reason': '계좌 투입/위험 한도 소진',
+                'n_positions': 0, 'deploy': 0, 'cash': 1-used, 'max_loss': used_risk}
     if deploy > cap > 0:
         shrink = cap / deploy
         for row in rows:
@@ -366,34 +415,15 @@ def build_portfolio(elite: list[dict], regime: str,
 
     out = {'regime': regime, 'regime_scale': scale,
            'n_positions': len(rows), 'positions': rows,
-           'deploy': round(deploy, 4), 'cash': round(max(0.0, 1 - deploy), 4),
+           'deploy': round(deploy, 4), 'cash': round(max(0.0, 1 - used - deploy), 4),
+           'existing_deploy': used, 'total_deploy': used+deploy,
            'dropped_correlated': [{'ticker': d['ticker'], 'dup_with': d['dup_with'],
                                    'corr': d['dup_corr']} for d in dropped],
-           'max_loss': round(sum(r['loss_if_stopped'] for r in rows), 4)}
+           'max_loss': round(used_risk + sum(r['loss_if_stopped'] for r in rows), 4)}
 
     rho = _avg_pairwise_corr(chosen)
     out['avg_corr'] = round(rho, 2) if rho is not None else None
-    if exp and exp.get('avg_return') is not None:
-        n = len(rows)
-        r_ = rho if rho is not None else 0.3
-        # 균등분산 포트폴리오의 변동성: 상관이 높을수록 축소 효과가 줄어든다
-        sd = exp.get('std_return')
-        cyc_sd = (sd * math.sqrt((1 + (n - 1) * r_) / n)) if sd else None
-        m_dep = exp['avg_return']
-        out['expected'] = {
-            'source': exp['source'], 'n_samples': exp['n'],
-            'horizon_days': exp['horizon'],
-            'per_trade': round(m_dep, 4),
-            'on_deployed': round(m_dep, 4),
-            'on_total': round(m_dep * deploy, 4),
-            'band80_deployed': ([round(m_dep - 1.28 * cyc_sd, 4),
-                                 round(m_dep + 1.28 * cyc_sd, 4)]
-                                if cyc_sd else None),
-            'p_gain5_deployed': (round(1 - _norm_cdf((0.05 - m_dep) / cyc_sd), 3)
-                                 if cyc_sd else None),
-            'cycles_to_5pct_total': (round(math.log(1.05) / math.log(1 + m_dep * deploy), 1)
-                                     if m_dep * deploy > 0 else None),
-        }
+
     return out
 
 
@@ -404,6 +434,8 @@ def _norm_cdf(z: float) -> float:
 # ── 리포트 ───────────────────────────────────────────────────────────────────
 
 def _portfolio_lines(p: dict, sep2: str) -> list[str]:
+    if p and p.get('blocked_reason'):
+        return ['', '[ 포트폴리오 운용안 ]', p['blocked_reason']]
     """포트폴리오 운용안 렌더링 — 자산 대비 비중과 기대수익."""
     L = [f'  [ 포트폴리오 운용안 — 총자산 대비 배분 (최대 {PORTFOLIO_MAX_POSITIONS}종목) ]',
          sep2]
@@ -412,7 +444,7 @@ def _portfolio_lines(p: dict, sep2: str) -> list[str]:
              + (f'  |  픽 간 평균 상관 {p["avg_corr"]:.2f}'
                 if p.get('avg_corr') is not None else ''))
     if not p['positions']:
-        L.append('  ⛔ 신규 진입 보류 — 투입 0%, 전액 현금. 보유분은 손절만 유지하십시오.')
+        L.append('  ⛔ 신규 진입 보류 — 추가 투입 0%. 기존 보유 현황은 별도 유지됩니다.')
         L.append(sep2)
         return L
     L.append(f'  {"티커":<7} {"비중":>6} {"매수가":>10} {"익절":>10} {"손절":>10}'
@@ -422,8 +454,8 @@ def _portfolio_lines(p: dict, sep2: str) -> list[str]:
                  f' ${r["target"]:>9.2f} ${r["stop"]:>9.2f}'
                  f'  -{r["loss_if_stopped"]*100:>4.2f}% (-{r["stop_pct"]:.1f}%)')
     L.append(sep2)
-    L.append(f'  총 투입 {p["deploy"]*100:.1f}%  |  현금 {p["cash"]*100:.1f}%'
-             f'  |  전 종목 손절 시 총자산 -{p["max_loss"]*100:.1f}%')
+    L.append(f'  신규 투입 {p["deploy"]*100:.1f}%  |  현금 {p["cash"]*100:.1f}%'
+             f'  |  계획 손절 손실(갭 시 초과 가능) 총자산 -{p["max_loss"]*100:.1f}%')
     for d in p['dropped_correlated']:
         L.append(f'  ▽ {d["ticker"]} 제외 — {d["dup_with"]}와 상관 {d["corr"]:.2f}'
                  ' (사실상 같은 종목, 분산 효과 없음)')
@@ -525,8 +557,8 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
                      f'  거래량 {q["vol_surge_3m"]:.1f}x  가격 {q["price_3m"]*100:+.1f}%'
                      f'  기술 {q["tech_score"]:>3}  확률 {prob_s:>4}{conf}{earn_s}{tag}')
         L.append(sep2)
-        L.append(f'  ✔확증 = 박스위치 {QUIET_BOX_MIN:.0%}↑ + 상승/하락 거래량 {QUIET_UPDN_MIN}x↑ (백테스트: 확증 시 평균 +4.6%/승률 70%, n=37 / 박스 하단은 +0.1%)')
-        L.append('  ※ 실측(20일 +10% 도달): 2x↑&횡보 약 51%(기준 34%), 3x↑는 표본 부족. 신호가 약해지는 추세라 단독 매수 근거 금지.')
+        L.append(f'  ✔확증 = 박스위치 {QUIET_BOX_MIN:.0%}↑ + 상승/하락 거래량 {QUIET_UPDN_MIN}x↑ (새 체결 기준 성과는 별도 추적 중)')
+        L.append('  ※ 매집 조건은 관찰 신호입니다. 새 체결 기준으로 성과를 검증해야 합니다.')
     else:
         L.append('  ◆ 조용한 매집 종목: 해당 없음')
     L.append(sep2)
@@ -546,11 +578,11 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
                      f'  (ATR {c["atr_pct"]:.1f}%){earn_s}')
             L.append(f'      매수 시 동시 주문: 목표 ${c["target"]:.2f} (+{COACH_TARGET*100:.0f}% GTC 지정가)'
                      f' | 손절 ${c["stop"]:.2f} (-{c["stop_pct"]:.1f}% = 3×ATR)')
-            L.append(f'      D+3({c["d3"]}) 종가 점검: ${c["d3_strong"]:.2f}↑ 강홀드(적중~80%)'
-                     f' / ${c["d3_hold"]:.2f}↑ 홀드(~50%)'
-                     f' / ${c["d3_watch"]:.2f}~${c["d3_hold"]:.2f} 관망(~25%)'
-                     f' / ${c["d3_cut"]:.2f}↓ 조기 정리(-{c["d3_cut_pct"]:.1f}%, ~10%)')
-            L.append(f'      D+10({c["d10"]})까지 미터치면 잔여 확률 낮음(급등군 68%가 D+10 내 도달)'
+            L.append(f'      D+3({c["d3"]}) 종가 점검: ${c["d3_strong"]:.2f}↑ 강홀드'
+                     f' / ${c["d3_hold"]:.2f}↑ 홀드'
+                     f' / ${c["d3_watch"]:.2f}~${c["d3_hold"]:.2f} 관망'
+                     f' / ${c["d3_cut"]:.2f}↓ 다음 거래일 시가 정리(-{c["d3_cut_pct"]:.1f}%)')
+            L.append(f'      D+10({c["d10"]})까지 미터치면 보유 조건 재점검'
                      f' → 손절 유지, D+{c["hold_days"]}({c["d20"]}) 정리')
         L.append(sep2)
         L.append(f'  ※ 실적 발표 {ELITE_EARNINGS_BLACKOUT}일 내 종목은 엘리트에서 자동 제외됨 —'
@@ -632,6 +664,8 @@ def regime_state(recent: dict | None) -> str:
     """최근 실측 터치율로 본 국면 — PORTFOLIO_REGIME_SCALE의 키."""
     if not recent:
         return 'normal'
+    if recent.get('n', 0) >= 30 and recent.get('rule_avg_return', 0) <= 0:
+        return 'halt'
     hr = recent['hit_rate']
     if hr < REGIME_HALT_HIT:
         return 'halt'
@@ -657,12 +691,18 @@ def regime_note(recent: dict | None) -> str | None:
 
 def get_spy_ret20(end_date: str | None, log: FetchLog) -> float | None:
     spy = get_ohlcv('SPY', period='1y', end_date=end_date, log=log)
+    try:
+        spy = completed_bars(spy, end_date)
+    except ValueError as exc:
+        log.ohlcv_fail.append(('SPY', str(exc)))
+        return None
     if len(spy) >= 21:
         return (float(spy['Close'].iloc[-1]) / float(spy['Close'].iloc[-21]) - 1) * 100
     return None
 
 
 def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
+    scan_date = resolve_session(scan_date)
     log = FetchLog()
     tickers = get_ticker_list(market)
     print(f'\n  미국 주식 +{SURGE_TARGET*100:.0f}% 급등 후보 스캔 (v2)')
@@ -670,6 +710,7 @@ def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
           f'  |  기준일 {scan_date or "최신"}')
 
     model_payload = load_model()
+    trade_payload = load_model('trade_target')
     if model_payload is None:
         print('  ⚠ 모델 미학습 — 기술점수 단독 모드 (surge_model.py train 권장)')
 
@@ -683,13 +724,27 @@ def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
         if i % 20 == 0 or i == len(tickers):
             print(f'  1차 스캔 {i}/{len(tickers)}  통과 {len(phase1)}', end='\r')
         time.sleep(0.05)
-    print(f'\n  1차 통과: {len(phase1)}종목 (기술점수 {TECH_SCORE_GATE}+)')
+    print(f'\n  유동성 통과: {len(phase1)}종목 (전체 모델 평가)')
 
     # 2차: info + 모델
     spy_ret20 = get_spy_ret20(scan_date, log)
-    date_str = scan_date or datetime.now().strftime('%Y-%m-%d')
-    results = [analyze_phase2(r, model_payload, spy_ret20, log, date_str) for r in phase1]
-    results = [r for r in results if r['combined'] >= FINAL_MIN_SCORE]
+    date_str = scan_date
+    results = [analyze_phase2(r, model_payload, spy_ret20, log, date_str, trade_payload) for r in phase1]
+    # Freeze all candidates before production filters, for out-of-sample comparisons.
+    audit = REPORTS_DIR / 'candidates'
+    audit.mkdir(exist_ok=True)
+    audit_path = audit / f'{date_str}.json'
+    if not audit_path.exists():
+        model_id = hashlib.sha256((HERE/'surge_model.pkl').read_bytes()).hexdigest() if model_payload else None
+        rows = [{**{k:v for k,v in r.items() if k not in ('df','ob','info')},
+                 'elite_eligible': bool(r.get('pred') and r['pred']['passes']
+                    and r['tech_score'] >= TECH_SCORE_GATE and r['combined'] >= FINAL_MIN_SCORE
+                    and r.get('gain5d',0) < .15 and not elite_exclusions(r))} for r in results]
+        with audit_path.open('x') as f:
+            json.dump({'session': date_str, 'executed_at': utc_now().isoformat(),
+                       'model_id': model_id, 'rows': rows, 'execution_policies': {r['ticker']: policy(r.get('atr_rel')) for r in results}}, f, ensure_ascii=False)
+    results = [r for r in results if r['tech_score'] >= TECH_SCORE_GATE
+               and r['combined'] >= FINAL_MIN_SCORE]
     results.sort(key=lambda x: x['combined'], reverse=True)
     results = results[:TOP_N_REPORT]
 
@@ -726,21 +781,20 @@ def run_scan(market: str = 'ALL', scan_date: str | None = None) -> list:
     return results, model_payload is not None, log, quiet_out
 
 
-def main(market: str = 'ALL', scan_date: str | None = None):
+def _main(market: str = 'ALL', scan_date: str | None = None):
+    scan_date = resolve_session(scan_date)
+    # Historical runs would mix present-day fundamentals, models and tracker state.
+    if scan_date != resolve_session():
+        raise ValueError('과거 날짜 스캔은 중단합니다. 고정된 후보 기록으로 전략을 비교하세요.')
+    if (REPORTS_DIR / f'{scan_date}_scan.json').exists():
+        print('  해당 미국 거래일 리포트가 이미 있습니다. 중복 실행을 생략합니다.')
+        return
     results, model_ok, log, quiet = run_scan(market, scan_date)
-    date_str = scan_date or datetime.now().strftime('%Y-%m-%d')
+    date_str = scan_date
 
     # 조용한 매집 신호 기록 + 기한 도래분 평가 (엘리트픽/후보 유무와 무관)
     quiet_tracker.save_quiet(quiet, date_str)
     quiet_tracker.evaluate(verbose=True)
-
-    if not results:
-        print('  발굴 종목 없음.')
-        if quiet:
-            print(f'  (조용한 매집 {len(quiet)}종목: ' + ', '.join(q['ticker'] for q in quiet) + ')')
-        for line in log.summary_lines():
-            print(line)
-        return
 
     # 기한 도래분 실측 평가를 먼저 — 오늘 게이트와 국면 경고가 최신 실측을 쓰도록
     tracker.evaluate(verbose=True)
@@ -749,7 +803,8 @@ def main(market: str = 'ALL', scan_date: str | None = None):
     default_thr = 0.0
     if model_ok:
         default_thr = load_model()['threshold']
-    gate, gate_note = tracker.recommended_min_prob(default_thr)
+    model_id = hashlib.sha256((HERE/'surge_model.pkl').read_bytes()).hexdigest() if model_ok else None
+    gate, gate_note = tracker.recommended_min_prob(default_thr, model_id)
     if model_ok:
         apply_gate(results, gate)
 
@@ -757,17 +812,21 @@ def main(market: str = 'ALL', scan_date: str | None = None):
     coaching = build_coaching(results, elite, date_str)
     recent = tracker.recent_performance()
     regime = regime_note(recent)
+    state, state_note = load_state(date_str)
     portfolio = build_portfolio(elite, regime_state(recent),
-                                tracker.rule_expectation(PORTFOLIO_MIN_ELITE_N))
+                                tracker.rule_expectation(PORTFOLIO_MIN_ELITE_N), state, state_note)
     report = build_report(results, elite, market, model_ok, gate_note, log,
                           date_str, coaching, regime, excluded, portfolio, quiet)
+    report += '\n※ 가격표는 신호 종가 기준 참고값입니다. 다음 거래일 실제 체결가로 목표·손절을 다시 계산하세요.\n'
+    report += '※ 성과는 다음 시가 진입, 비용·갭·D+3 정리를 반영한 모의 결과이며 계좌 체결 내역이 아닙니다.\n'
     print('\n' + report)
 
     # 저장 (텍스트 리포트 + 요약 이메일용 JSON)
     fname = f'{date_str}_scan'
     (REPORTS_DIR / f'{fname}.txt').write_text(report, encoding='utf-8')
     scan_json = {
-        'scan_date': date_str, 'market': market, 'model_ok': model_ok,
+        'scan_date': date_str, 'executed_at': utc_now().isoformat(),
+        'entry_basis': 'next_session_open', 'market': market, 'model_ok': model_ok,
         'gate_note': gate_note,
         'regime_note': regime,
         'coaching': coaching,
@@ -777,6 +836,7 @@ def main(market: str = 'ALL', scan_date: str | None = None):
             'ticker': r['ticker'], 'name': r['name'], 'price': r['price'],
             'combined': r['combined'], 'tech_score': r['tech_score'],
             'prob': (r.get('pred') or {}).get('prob'),
+        'trade_target_prob': r.get('trade_target_prob'),
             'passes_gate': (r.get('pred') or {}).get('passes', False),
             'vol_ratio': r['vol_ratio'], 'price_vs_ma20': r.get('price_vs_ma20'),
             'rs_vs_spy': r.get('rs_vs_spy'), 'sector': r.get('sector', ''),
@@ -791,14 +851,13 @@ def main(market: str = 'ALL', scan_date: str | None = None):
             'patterns': [m['name'] for m in r.get('patterns', [])],
         } for r in results],
     }
-    (REPORTS_DIR / f'{fname}.json').write_text(
-        json.dumps(scan_json, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(f'\n  리포트 저장: reports/{fname}.txt / .json')
-
     # 예측 기록 + 실측 평가
     tracker.save_predictions([{
         'ticker': r['ticker'], 'close': r['price'],
+        'model_id': model_id,
+        'executed_at': utc_now().isoformat(),
         'prob': (r.get('pred') or {}).get('prob'),
+        'trade_target_prob': r.get('trade_target_prob'),
         'tech_score': r['tech_score'], 'combined': r['combined'],
         'atr_rel': r.get('atr_rel'),
         'stop_pct': round(coaching_stop_pct(r.get('atr_rel')), 4),
@@ -806,6 +865,10 @@ def main(market: str = 'ALL', scan_date: str | None = None):
         'vs_ma200': r.get('vs_ma200'), 'days_to_earnings': r.get('days_to_earnings'),
         'elite': any(e['ticker'] == r['ticker'] for e in elite),
     } for r in results], scan_date=date_str)
+
+    write_text(REPORTS_DIR / f'{fname}.json',
+               json.dumps(scan_json, ensure_ascii=False, indent=2))
+    print(f'\n  리포트 저장: reports/{fname}.txt / .json')
 
     # 이메일
     subject = (f'[미국주식 v2] {date_str} — 엘리트픽 {len(elite)}종목'
@@ -815,7 +878,26 @@ def main(market: str = 'ALL', scan_date: str | None = None):
     print(f'  완료. {len(results)}종목 발굴, 엘리트픽 {len(elite)}종목.')
 
 
+def main(market: str = 'ALL', scan_date: str | None = None):
+    # OS lock is released even after a crash; parallel schedulers cannot double-send.
+    import fcntl
+    with (REPORTS_DIR / '.scan.lock').open('a') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print('  다른 스캔이 실행 중입니다.')
+            return
+        try:
+            return _main(market, scan_date)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 if __name__ == '__main__':
     market_arg = sys.argv[1] if len(sys.argv) > 1 else 'ALL'
     date_arg   = sys.argv[2] if len(sys.argv) > 2 else None
-    main(market_arg, scan_date=date_arg)
+    if date_arg is not None and resolve_session(date_arg) != resolve_session():
+        raise ValueError('과거 날짜 운영 스캔은 지원하지 않습니다.')
+    # Preserve the existing scheduled CLI while ensuring compatible artifacts.
+    from scheduled_scan import main as scheduled_main
+    scheduled_main([market_arg])

@@ -3,7 +3,7 @@
 현재 조건(A: 60일 거래량 2x↑ + 가격 ±10%)과, 증거를 겹쳐 쌓은 강화 조건(B~E),
 돌파 확인 진입(F)의 성과를 같은 매매 규칙으로 비교한다.
 
-매매 규칙(코칭과 동일): 신호일 종가 진입 → +12% 익절(고가) / 손절 3×ATR(7~15%, 저가)
+매매 규칙(코칭과 동일): 다음 거래일 시가 진입(비용·갭·D+3 정리 반영) → +12% 익절(고가) / 손절 3×ATR(7~15%, 저가)
 / 20거래일 종가 정리. 같은 날 익절·손절이 겹치면 손절 우선(보수적).
 독립성: 종목별로 한 번 신호가 나면 20거래일 쿨다운(중복 표본 제거).
 look-ahead 없음: 신호는 해당 일 종가까지의 데이터만 사용.
@@ -23,6 +23,7 @@ from config import HISTORY_PERIOD, MIN_PRICE, COACH_STOP_ATR_MULT, COACH_STOP_MI
 from data_fetcher import get_ohlcv, FetchLog
 from indicators import add_all
 from universe import get_ticker_list
+from execution import simulate as execute, policy
 
 CACHE = Path('/tmp/quiet_bt_cache.pkl')
 BT_PERIOD = '10y'
@@ -106,15 +107,10 @@ def simulate(df: pd.DataFrame, mask: pd.Series) -> list[dict]:
             continue
         last = i
         entry = c[i]
-        stop = min(COACH_STOP_MAX, max(COACH_STOP_MIN, COACH_STOP_ATR_MULT * atr[i]))
-        res, ret = 'time', c[i + HORIZON] / entry - 1
-        for j in range(i + 1, i + HORIZON + 1):
-            if l[j] / entry - 1 <= -stop:
-                res, ret = 'stop', -stop
-                break
-            if h[j] / entry - 1 >= TARGET:
-                res, ret = 'target', TARGET
-                break
+        ev = execute(df.iloc[i+1:i+HORIZON+1], HORIZON, policy(atr[i]))
+        if ev is None:
+            continue
+        res, ret = ev['rule_outcome'], ev['rule_return']
         touch = h[i + 1:i + HORIZON + 1].max() / entry - 1 >= TOUCH
         out.append({'date': df.index[i], 'res': res, 'ret': ret, 'touch': touch,
                     'mdd': l[i + 1:i + HORIZON + 1].min() / entry - 1})
@@ -142,7 +138,7 @@ def main():
         df = features(raw, spy)
         for name, m in conditions(df).items():
             agg.setdefault(name, []).extend(simulate(df, m.fillna(False)))
-    print('규칙: 진입 종가 / 익절 +12% / 손절 3×ATR(7~15%) / 20일 정리, 쿨다운 20일')
+    print('규칙: 진입 다음 시가 / 익절 +12% / 손절 3×ATR(7~15%) / 20일 정리, 쿨다운 20일')
     for name, rows in agg.items():
         print(summarize(name, rows))
 

@@ -32,16 +32,20 @@ from config import (SURGE_TARGET, SURGE_HORIZON, HOLD_HORIZONS, TARGET_PRECISION
                     COACH_STOP_MIN, COACH_STOP_MAX, COACH_STOP_ATR_MULT,
                     COACH_TARGET, TRACKER_MIN_BUCKET_N, RECENT_SCANS)
 from data_fetcher import get_ohlcv
+from execution import simulate, policy, VERSION
+from market_clock import session_offset, session_dates, completed_session
+import pandas as pd
+from storage import write_text
 
 HERE = Path(__file__).parent
-PRED_DIR   = HERE / 'predictions'
-STATS_PATH = HERE / 'tracker_stats.json'
-PRED_DIR.mkdir(exist_ok=True)
+PRED_DIR   = HERE / 'predictions' / 'v3'
+STATS_PATH = HERE / 'tracker_stats_v3.json'
+PRED_DIR.mkdir(exist_ok=True, parents=True)
 
 # 20일 라벨은 보정 확률이 높게 분포하므로 상단(0.65) 버킷을 추가해 변별
 PROB_BUCKETS = [0.0, 0.15, 0.25, 0.35, 0.50, 0.65, 1.01]
 
-RULE_OUTCOMES = ('target', 'stop', 'time')
+RULE_OUTCOMES = ('target', 'stop', 'time', 'd3')
 
 
 def save_predictions(rows: list[dict], scan_date: str) -> int:
@@ -49,12 +53,11 @@ def save_predictions(rows: list[dict], scan_date: str) -> int:
               bb_compress, dist_20d_high, vs_ma200, days_to_earnings, elite}, ...]
     엘리트 여부·제외 규칙 피처를 함께 남겨 이후 실측 분석이 재구성 없이 가능하게 한다."""
     path = PRED_DIR / f'preds_{scan_date}.jsonl'
-    with open(path, 'w', encoding='utf-8') as f:
-        for r in rows:
-            rec = {'scan_date': scan_date, 'model_horizon': SURGE_HORIZON,
-                   'evals': {}, **r}
-            f.write(json.dumps(rec, ensure_ascii=False) + '\n')
-    return len(rows)
+    records = [{'scan_date': scan_date, 'model_horizon': SURGE_HORIZON,
+                'evals': {}, **r, 'execution_policy': policy(r.get('atr_rel')),
+                'execution_version': VERSION} for r in rows]
+    text = ''.join(json.dumps(r, ensure_ascii=False)+'\n' for r in records)
+    return len(rows) if write_text(path, text, exclusive=True) else 0
 
 
 def _migrate(r: dict) -> dict:
@@ -80,9 +83,8 @@ def _write_back(records: list[dict]) -> None:
     for r in records:
         by_date.setdefault(r['scan_date'], []).append(r)
     for d, rows in by_date.items():
-        with open(PRED_DIR / f'preds_{d}.jsonl', 'w', encoding='utf-8') as f:
-            for r in rows:
-                f.write(json.dumps(r, ensure_ascii=False) + '\n')
+        write_text(PRED_DIR / f'preds_{d}.jsonl',
+                   ''.join(json.dumps(r, ensure_ascii=False)+'\n' for r in rows))
 
 
 def _atr_rel_at(df, scan_date: str) -> float | None:
@@ -102,27 +104,18 @@ def _atr_rel_at(df, scan_date: str) -> float | None:
 
 
 def _rule_params(r: dict) -> tuple[float, float]:
-    """이 레코드를 지금 규칙으로 평가할 때의 (익절폭, 손절폭).
-    손절폭은 atr_rel에서 현재 상·하한으로 매번 다시 계산한다 — COACH_STOP_MAX를
-    바꾸면 과거 레코드도 같은 규칙으로 재평가돼 통계가 섞이지 않는다.
-    atr_rel이 없는 구형 레코드는 evaluate()가 시세에서 백필하며, 그 전까지는
-    기록 당시 손절폭을 쓴다 (익절만 바뀐 혼합 평가를 피하려면 백필이 선행돼야 한다)."""
-    atr = r.get('atr_rel')
-    if atr:
-        stop = min(COACH_STOP_MAX, max(COACH_STOP_MIN, COACH_STOP_ATR_MULT * atr))
-    else:
-        stop = r.get('stop_pct') or COACH_STOP_MIN
-    return COACH_TARGET, round(float(stop), 4)
+    rules = r['execution_policy']
+    return rules['target'], rules['stop_pct']
 
 
 def _eval_window(after, entry_close: float, horizon: int,
-                 stop_pct: float, target: float) -> dict | None:
+                 stop_pct: float, target: float, rules: dict | None = None) -> dict | None:
     """scan_date 이후 horizon 거래일 창의 실측 지표. 창이 덜 찼으면 None.
 
     hit          : 창 내 고가가 +SURGE_TARGET 터치 (손절 무시 — 모델 라벨과 동일).
                    익절폭(COACH_TARGET)과 무관하게 라벨 정의를 유지한다.
     rule_outcome : 코칭 규칙대로 매매했을 때의 결과 —
-                   D0 종가 진입, +target GTC 지정가, -stop_pct 손절, 기한 종가 정리.
+                   다음 거래일 시가 진입, 비용·갭·D+3 정리를 반영한 모의 체결.
                    같은 날 목표·손절이 모두 걸리면 손절로 간주(보수적).
     """
     win = after.head(horizon)
@@ -133,30 +126,21 @@ def _eval_window(after, entry_close: float, horizon: int,
     close = win['Close'].values / entry_close - 1
 
     hit_days  = np.where(high >= SURGE_TARGET)[0]
-    stop_days = np.where(low <= -stop_pct)[0]
-    sell_days = np.where(high >= target)[0]
-    first_hit  = int(hit_days[0]) + 1 if len(hit_days) else None
-    first_stop = int(stop_days[0]) + 1 if len(stop_days) else None
-    first_sell = int(sell_days[0]) + 1 if len(sell_days) else None
-
-    if first_stop is not None and (first_sell is None or first_stop <= first_sell):
-        outcome, rule_ret = 'stop', -stop_pct
-    elif first_sell is not None:
-        outcome, rule_ret = 'target', target
-    else:
-        outcome, rule_ret = 'time', float(close[-1])
-
+    first_hit = int(hit_days[0])+1 if len(hit_days) else None
+    execution = simulate(win, horizon, rules or {**policy(), 'stop_pct': stop_pct, 'target': target})
+    if execution is None:
+        return None
     return {'max_gain':   round(float(high.max()), 4),
             'end_return': round(float(close[-1]), 4),
             'max_dd':     round(float(low.min()), 4),
             'hit':        bool(high.max() >= SURGE_TARGET),
             'first_hit_day':  first_hit,
-            'first_stop_day': first_stop,
+            'first_stop_day': (int(np.where(win.index == pd.Timestamp(execution['exit_date']))[0][0])+1
+                               if execution['rule_outcome'] == 'stop' else None),
             'd3_close':   round(float(close[2]), 4) if len(close) >= 3 else None,
             'stop_pct':   stop_pct,
             'rule_target': target,
-            'rule_outcome': outcome,
-            'rule_return':  round(float(rule_ret), 4)}
+            **execution}
 
 
 def _needs_eval(r: dict, horizon: int) -> bool:
@@ -164,21 +148,18 @@ def _needs_eval(r: dict, horizon: int) -> bool:
     # 구형 평가(규칙 결과 없음)도 재평가해 백필
     if ev is None or 'rule_outcome' not in ev:
         return True
-    # 익절·손절 규칙이 바뀌었으면 과거분도 새 규칙으로 다시 평가한다.
-    # (안 하면 tracker_stats가 옛 규칙 결과와 새 규칙 결과의 혼합이 된다)
-    target, stop_pct = _rule_params(r)
-    return ev.get('rule_target') != target or ev.get('stop_pct') != stop_pct
+    return False  # frozen execution policy: never rewrite an evaluated result
 
 
 def _independent(done: list[dict], horizon: int) -> list[dict]:
-    """종목별로 평가 창(horizon 거래일 ≈ 1.4배 달력일)이 겹치지 않는 레코드만.
+    """종목별로 평가 창(horizon NYSE 거래일)이 겹치지 않는 레코드만.
     연일 반복 등장하는 종목이 같은 급등을 여러 번 세는 것을 막는다."""
-    gap = timedelta(days=int(horizon * 1.4))
+    gap = horizon
     last: dict[str, datetime] = {}
     out = []
     for r in sorted(done, key=lambda r: (r['ticker'], r['scan_date'])):
         d = datetime.strptime(r['scan_date'], '%Y-%m-%d')
-        if r['ticker'] not in last or d - last[r['ticker']] >= gap:
+        if r['ticker'] not in last or r['scan_date'] >= session_offset(last[r['ticker']], gap):
             out.append(r)
             last[r['ticker']] = d
     return out
@@ -229,8 +210,7 @@ def evaluate(verbose: bool = True) -> dict | None:
     if not records:
         return None
 
-    # 최소 기한(거래일) ≈ 1.4배 달력일 — 그 전엔 fetch 자체를 생략
-    prefilter = datetime.now() - timedelta(days=int(min(HOLD_HORIZONS) * 1.4) + 2)
+    latest = completed_session()
     cache: dict = {}
 
     for r in records:
@@ -240,11 +220,12 @@ def evaluate(verbose: bool = True) -> dict | None:
         pending = [h for h in HOLD_HORIZONS if _needs_eval(r, h)]
         if not pending and not needs_backfill:
             continue
-        if datetime.strptime(r['scan_date'], '%Y-%m-%d') > prefilter:
+        if session_offset(r['scan_date'], min(HOLD_HORIZONS)) > latest:
             continue
         if r['ticker'] not in cache:
-            cache[r['ticker']] = get_ohlcv(r['ticker'], period='6mo')
+            cache[r['ticker']] = get_ohlcv(r['ticker'], period='max')
         df = cache[r['ticker']]
+        df = df.loc[df.index <= pd.Timestamp(latest)]
         if df.empty:
             continue
         if needs_backfill:
@@ -256,16 +237,25 @@ def evaluate(verbose: bool = True) -> dict | None:
             pending = [h for h in HOLD_HORIZONS if _needs_eval(r, h)]
             if not pending:
                 continue
-        after = df[df.index > r['scan_date']]
+        # Rebase adjusted OHLC to the signal's frozen close after splits/dividends.
+        if pd.Timestamp(r['scan_date']) not in df.index:
+            continue
+        scale = r['close'] / float(df.loc[r['scan_date'], 'Close'])
+        after = df[df.index > r['scan_date']].copy()
+        after[['Open','High','Low','Close']] *= scale
+        expected = session_dates(session_offset(r['scan_date'], 1),
+                                 session_offset(r['scan_date'], max(HOLD_HORIZONS)))
+        after = after.reindex(expected)
         target, stop_pct = _rule_params(r)
         for h in pending:
-            ev = _eval_window(after, r['close'], h, stop_pct, target)
+            ev = _eval_window(after, r['close'], h, stop_pct, target, r['execution_policy'])
             if ev is not None:
                 r['evals'][f'h{h}'] = ev
 
     _write_back(records)
 
     stats = {'updated_at': datetime.now().isoformat(),
+             'execution_version': VERSION,
              'target': SURGE_TARGET,
              'primary_horizon': SURGE_HORIZON,
              'horizons': {}}
@@ -332,8 +322,7 @@ def evaluate(verbose: bool = True) -> dict | None:
     stats['overall_hit_rate'] = prim['hit_rate'] if prim else None
     stats['buckets']          = prim['buckets'] if prim else []
 
-    with open(STATS_PATH, 'w', encoding='utf-8') as f:
-        json.dump(stats, f, ensure_ascii=False, indent=2)
+    write_text(STATS_PATH, json.dumps(stats, ensure_ascii=False, indent=2))
 
     if verbose:
         for h in HOLD_HORIZONS:
@@ -403,7 +392,7 @@ def rule_expectation(min_elite_n: int, horizon: int = SURGE_HORIZON) -> dict | N
             'elite_n': el['n'] if el else 0}
 
 
-def recommended_min_prob(default: float) -> tuple[float, str]:
+def recommended_min_prob(default: float, model_id: str | None = None) -> tuple[float, str]:
     """주 기한(SURGE_HORIZON)의 독립 표본에서, 게이트 이상 픽의 누적 정밀도가
     TARGET_PRECISION 이상이 되는 최소 확률 구간 하한을 권고.
     누적 표본 TRACKER_MIN_BUCKET_N 미만이면 모델 임계값 유지.
@@ -414,6 +403,12 @@ def recommended_min_prob(default: float) -> tuple[float, str]:
         return default, '실측 표본 없음/손상 → 모델 임계값 사용'
 
     hs = stats.get('horizons', {}).get(str(SURGE_HORIZON), stats)
+    if model_id is not None:
+        done = [r for r in _load_all() if r.get('model_id') == model_id
+                and r.get('prob') is not None and r['evals'].get(f'h{SURGE_HORIZON}')]
+        indep = _independent(done, SURGE_HORIZON)
+        hs = {'buckets_independent': _buckets(indep, SURGE_HORIZON),
+              'n_independent': len(indep)}
     buckets = hs.get('buckets_independent') or hs.get('buckets', [])
     n_total = hs.get('n_independent', hs.get('n_evaluated', 0))
 
@@ -428,8 +423,8 @@ def recommended_min_prob(default: float) -> tuple[float, str]:
             best = (b['prob_min'], prec, n)
             break
     if best is None:
-        return default, (f'{SURGE_HORIZON}일 독립 표본 {n_total}건 중 목표 정밀도 '
-                         f'{TARGET_PRECISION:.0%} 달성 구간 없음 → 모델 임계값 사용')
+        return (1.01 if n_total >= TRACKER_MIN_BUCKET_N else default), (f'{SURGE_HORIZON}일 독립 표본 {n_total}건 중 목표 정밀도 '
+                         f'{TARGET_PRECISION:.0%} 달성 구간 없음 → 충분한 표본이면 신규 추천 보류')
     pmin, prec, n = best
     return max(default, pmin), (
         f'실측({SURGE_HORIZON}일, 독립 {n_total}건) 기반 게이트: 확률 {pmin:.2f}+ '

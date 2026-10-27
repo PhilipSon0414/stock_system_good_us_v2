@@ -26,7 +26,7 @@
 import json
 import sys
 import warnings
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 warnings.filterwarnings('ignore')
@@ -40,6 +40,9 @@ from indicators import add_all, MODEL_FEATURES
 from surge_model import add_trend_deltas
 from data_fetcher import get_ohlcv, FetchLog
 from universe import get_ticker_list
+from storage import write_text
+from validation import purged_split
+from market_clock import completed_bars, completed_session
 
 HERE = Path(__file__).parent
 REPORTS_DIR = HERE / 'reports'
@@ -103,9 +106,15 @@ def build_pattern_dataset(horizons: list[int], verbose: bool = True) -> pd.DataF
     tickers = get_ticker_list('TRAIN')
     log = FetchLog()
     frames = []
+    session = completed_session()
     for i, t in enumerate(tickers, 1):
         raw = get_ohlcv(t, period=HISTORY_PERIOD, log=log)
         if len(raw) < 260:
+            continue
+        try:
+            raw = completed_bars(raw, session)
+        except ValueError as exc:
+            log.ohlcv_fail.append((t, str(exc)))
             continue
         df = add_all(raw)
         df = add_trend_deltas(df)
@@ -177,8 +186,7 @@ def quintile_stats(d: pd.DataFrame, label: str) -> list[dict]:
 
 def extract_rules(d: pd.DataFrame, label: str, horizon: int) -> list[dict]:
     d = d.dropna(subset=TREE_FEATURES + [label])
-    split = int(len(d) * 0.7)          # 시간순 정렬 상태 유지
-    train, hold = d.iloc[:split], d.iloc[split:]
+    train, hold = purged_split(d, 0.7, horizon)
     base_hold = hold[label].mean()
 
     tree = DecisionTreeClassifier(max_depth=3,
@@ -263,7 +271,8 @@ def load_rules() -> list[dict]:
     if not RULES_PATH.exists():
         return []
     try:
-        return json.loads(RULES_PATH.read_text(encoding='utf-8')).get('rules', [])
+        payload = json.loads(RULES_PATH.read_text(encoding='utf-8'))
+        return payload.get('rules', []) if payload.get('schema_version') == 2 else []
     except Exception:
         return []
 
@@ -370,11 +379,12 @@ def main():
         print(f'\n  리포트 저장: {path}')
         all_rules += rules
 
-    RULES_PATH.write_text(json.dumps({
-        'generated_at': datetime.now().isoformat(),
+    write_text(RULES_PATH, json.dumps({
+        'schema_version': 2,
+        'generated_at': datetime.now(timezone.utc).isoformat(),
         'target': SURGE_TARGET,
         'rules': all_rules,
-    }, ensure_ascii=False, indent=2), encoding='utf-8')
+    }, ensure_ascii=False, indent=2))
     print(f'\n  규칙 저장: {RULES_PATH} ({len(all_rules)}개 — daily_scan이 자동 사용)')
 
 

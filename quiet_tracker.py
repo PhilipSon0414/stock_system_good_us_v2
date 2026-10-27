@@ -15,22 +15,28 @@ import pandas as pd
 import tracker
 from config import COACH_TARGET
 from data_fetcher import get_ohlcv
+from execution import policy
+from market_clock import session_dates, session_offset, completed_session
 
-PRED_DIR = Path(__file__).parent / 'predictions'
-STATS_PATH = Path(__file__).parent / 'quiet_stats.json'
+PRED_DIR = Path(__file__).parent / 'predictions' / 'v3'
+STATS_PATH = Path(__file__).parent / 'quiet_stats_v3.json'
 HORIZON = 20
 
 
 def save_quiet(quiet: list[dict], scan_date: str) -> int:
     if not quiet:
         return 0
-    PRED_DIR.mkdir(exist_ok=True)
-    with open(PRED_DIR / f'quiet_{scan_date}.jsonl', 'w', encoding='utf-8') as f:
+    PRED_DIR.mkdir(exist_ok=True, parents=True)
+    path = PRED_DIR / f'quiet_{scan_date}.jsonl'
+    if path.exists():
+        return 0
+    with open(path, 'x', encoding='utf-8') as f:
         for q in quiet:
             rec = {'scan_date': scan_date, 'ticker': q['ticker'], 'close': q['price'],
                    'vol_surge_3m': q['vol_surge_3m'], 'price_3m': q['price_3m'],
                    'box_pos': q.get('box_pos'), 'updn_vol': q.get('updn_vol'),
                    'confirmed': bool(q.get('confirmed')), 'atr_rel': q.get('atr_rel'),
+                   'execution_policy': policy(q.get('atr_rel')),
                    'tech_score': q.get('tech_score'), 'prob': q.get('prob'), 'evals': {}}
             f.write(json.dumps(rec, ensure_ascii=False) + '\n')
     return len(quiet)
@@ -65,14 +71,21 @@ def evaluate(verbose: bool = True) -> dict | None:
                 continue
             t = r['ticker']
             if t not in cache:
-                cache[t] = get_ohlcv(t, period='2y')
+                cache[t] = get_ohlcv(t, period='max')
             df = cache[t]
+            df = df.loc[df.index <= pd.Timestamp(completed_session())]
             if df.empty:
                 continue
-            after = df[df.index > pd.Timestamp(r['scan_date'])]
-            atr = r.get('atr_rel')
-            stop = min(0.15, max(0.07, 3.0 * atr)) if atr else 0.07
-            ev = tracker._eval_window(after, r['close'], HORIZON, stop, COACH_TARGET)
+            if pd.Timestamp(r['scan_date']) not in df.index:
+                continue
+            scale = r['close'] / float(df.loc[r['scan_date'], 'Close'])
+            after = df[df.index > pd.Timestamp(r['scan_date'])].copy()
+            after[['Open','High','Low','Close']] *= scale
+            after = after.reindex(session_dates(session_offset(r['scan_date'], 1),
+                                               session_offset(r['scan_date'], HORIZON)))
+            rules = r['execution_policy']
+            ev = tracker._eval_window(after, r['close'], HORIZON,
+                                      rules['stop_pct'], rules['target'], rules)
             if ev is not None:
                 r['evals'][str(HORIZON)] = ev
                 changed = True

@@ -31,7 +31,9 @@ v1의 스테이지 분류 모델을 폐기하고 목표에 직결되는 이진 �
 import sys
 import pickle
 import warnings
-from datetime import datetime
+import os
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 warnings.filterwarnings('ignore')
@@ -48,9 +50,14 @@ from config import (SURGE_TARGET, SURGE_HORIZON, HISTORY_PERIOD, MIN_PRICE,
 from indicators import add_all, validate_features, MODEL_FEATURES, TREND_FEATURES
 from data_fetcher import get_ohlcv, FetchLog
 from universe import get_ticker_list
+from validation import purged_split
+from market_clock import completed_session, completed_bars
+from execution import simulate, policy, VERSION
+MODEL_SCHEMA = 2
 
 HERE = Path(__file__).parent
 MODEL_PATH = HERE / 'surge_model.pkl'
+TRADE_MODEL_PATH = HERE / 'trade_model.pkl'
 
 # SPY 국면 피처(5/20일 수익률, MA50 상회, 20일 변동성)는 walk-forward에서
 # 중립(폴드 정밀도 ±3%p)이라 채택하지 않았다. 국면 대응은 tracker의 최근
@@ -82,20 +89,37 @@ def make_labels(df: pd.DataFrame) -> pd.Series:
     return label
 
 
+def make_trade_labels(df):
+    """Research label: target fills before stop, D3 cut or time exit."""
+    labels = pd.Series(np.nan, index=df.index)
+    for i in range(250, len(df)-SURGE_HORIZON):
+        ev = simulate(df.iloc[i+1:i+1+SURGE_HORIZON], SURGE_HORIZON,
+                      policy(df['ATRRel'].iloc[i]))
+        if ev is not None:
+            labels.iloc[i] = float(ev['rule_outcome'] == 'target')
+    return labels
+
+
 def build_dataset(tickers: list[str] | None = None,
-                  verbose: bool = True) -> pd.DataFrame:
+                  verbose: bool = True, objective: str = 'touch') -> pd.DataFrame:
     # 학습은 스캔 유니버스보다 넓은 'TRAIN' 목록 사용 (일반화 성능 향상)
     tickers = tickers or get_ticker_list('TRAIN')
     log = FetchLog()
     frames = []
+    session = completed_session()
 
     for i, t in enumerate(tickers, 1):
         raw = get_ohlcv(t, period=HISTORY_PERIOD, log=log)
         if len(raw) < 260:
             continue
+        try:
+            raw = completed_bars(raw, session)
+        except ValueError as exc:
+            log.ohlcv_fail.append((t, str(exc)))
+            continue
         df = add_all(raw)
         df = add_trend_deltas(df)
-        df['label']  = make_labels(df)
+        df['label'] = make_labels(df) if objective == 'touch' else make_trade_labels(df)
         df['ticker'] = t
         df['date']   = df.index
 
@@ -135,12 +159,13 @@ def _fit_calibrated(train: pd.DataFrame, feat_cols: list[str] | None = None) -> 
     """시간순 앞 (1-CALIB_FRACTION)으로 학습, 뒤 CALIB_FRACTION으로
     isotonic 보정 + 임계값 선택. 최근 1년 샘플에 가중치 부여."""
     feat_cols = feat_cols or feature_columns()
-    n_cal = max(200, int(len(train) * CALIB_FRACTION))
-    fit_part, cal_part = train.iloc[:-n_cal], train.iloc[-n_cal:]
+    fit_part, reserved = purged_split(train, 1-CALIB_FRACTION, SURGE_HORIZON)
+    cal_part, selection = purged_split(reserved, 0.5, SURGE_HORIZON)
 
     model = HistGradientBoostingClassifier(
         max_iter=300, learning_rate=0.05, max_depth=6,
         min_samples_leaf=30, class_weight='balanced', random_state=42,
+        early_stopping=False,  # default random validation is inappropriate here
     )
     model.fit(fit_part[feat_cols].values,
               fit_part['label'].values.astype(int),
@@ -150,7 +175,8 @@ def _fit_calibrated(train: pd.DataFrame, feat_cols: list[str] | None = None) -> 
     y_cal = cal_part['label'].values.astype(int)
     iso = IsotonicRegression(out_of_bounds='clip', y_min=0.0, y_max=1.0)
     iso.fit(p_raw, y_cal)
-    p_cal = iso.predict(p_raw)
+    p_cal = iso.predict(model.predict_proba(selection[feat_cols].values)[:, 1])
+    y_cal = selection['label'].values.astype(int)
 
     # 목표 정밀도를 만족하는 최소 임계값 (검증 표본 20개 이상 조건)
     threshold = None
@@ -162,7 +188,7 @@ def _fit_calibrated(train: pd.DataFrame, feat_cols: list[str] | None = None) -> 
                 threshold = float(t)
                 break
     if threshold is None:
-        threshold = max(MIN_PROB_FLOOR, float(np.quantile(p_cal, 0.95)))
+        threshold = 1.01  # no validated operating point: abstain
 
     return {'model': model, 'iso': iso, 'feat_cols': feat_cols,
             'threshold': threshold, 'base_rate': float(train['label'].mean())}
@@ -213,27 +239,50 @@ def walk_forward_backtest(data: pd.DataFrame, n_folds: int = 3,
         print(f'    상위 10% 확률 구간 정밀도: {prec_td:.1%}  lift {prec_td/base:.2f}x')
 
 
-def train_and_save(data: pd.DataFrame) -> dict:
+def train_and_save(data: pd.DataFrame, objective: str = 'touch') -> dict:
     if len(data) < MIN_TRAIN_ROWS:
         raise RuntimeError(f'학습 샘플 부족: {len(data)} < {MIN_TRAIN_ROWS}')
     fit = _fit_calibrated(data)
     payload = {**fit,
                'target': SURGE_TARGET, 'horizon': SURGE_HORIZON,
-               'trained_at': datetime.now().isoformat(),
-               'n_rows': len(data)}
-    with open(MODEL_PATH, 'wb') as f:
-        pickle.dump(payload, f)
-    print(f'\n  모델 저장: {MODEL_PATH}')
+               'trained_at': datetime.now(timezone.utc).isoformat(),
+               'n_rows': len(data), 'schema_version': MODEL_SCHEMA,
+               'training_last_signal': str(data['date'].max()),
+               'validation': 'purged_fit_calibration_selection', 'objective': objective,
+               'execution_version': VERSION if objective == 'trade_target' else None,
+               'execution_policy_template': policy() if objective == 'trade_target' else None}
+    destination = MODEL_PATH if objective == 'touch' else TRADE_MODEL_PATH
+    fd, temporary = tempfile.mkstemp(dir=destination.parent, prefix='.model-')
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            pickle.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    print(f'\n  모델 저장: {destination}')
     print(f'  샘플 {len(data)}건  base rate {fit["base_rate"]:.1%}'
           f'  임계값 {fit["threshold"]:.2f}')
     return payload
 
 
-def load_model() -> dict | None:
-    if not MODEL_PATH.exists():
+def load_model(objective: str = 'touch') -> dict | None:
+    path = MODEL_PATH if objective == 'touch' else TRADE_MODEL_PATH
+    if not path.exists():
         return None
-    with open(MODEL_PATH, 'rb') as f:
-        return pickle.load(f)
+    with open(path, 'rb') as f:
+        payload = pickle.load(f)
+    if (payload.get('schema_version') != MODEL_SCHEMA or
+            payload.get('objective') != objective or
+            (objective == 'trade_target' and payload.get('execution_policy_template') != policy()) or
+            payload.get('horizon') != SURGE_HORIZON or
+            payload.get('target') != SURGE_TARGET or
+            payload.get('feat_cols') != feature_columns()):
+        print('  ⚠ 모델 재학습 필요: 검증 방식/목표/피처 버전 불일치')
+        return None
+    return payload
 
 
 def predict_prob(df: pd.DataFrame, loaded: dict | None = None) -> dict | None:
@@ -259,16 +308,18 @@ def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else 'train'
     print(f'\n  +10%/{SURGE_HORIZON}일 급등 예측 모델 — {cmd}')
     print('  [1] 데이터 구축...')
-    data = build_dataset()
+    objective = 'trade_target' if cmd == 'train-trade' else 'touch'
+    print(f'  학습 목표: {objective}')
+    data = build_dataset(objective=objective)
     pos = data['label'].mean()
     print(f'  전체 {len(data)}건  양성(+10% 도달) 비율 {pos:.1%}')
 
     print('  [2] Walk-forward 백테스트...')
     walk_forward_backtest(data)
 
-    if cmd == 'train':
+    if cmd in ('train', 'train-trade'):
         print('\n  [3] 전체 데이터로 최종 학습...')
-        train_and_save(data)
+        train_and_save(data, objective=objective)
 
 
 if __name__ == '__main__':

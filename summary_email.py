@@ -20,6 +20,7 @@ sys.path.insert(0, str(HERE))
 
 from email_sender import send_report
 from config import SURGE_TARGET, SURGE_HORIZON
+from market_clock import completed_session
 
 REPORTS_DIR = HERE / 'reports'
 
@@ -29,6 +30,8 @@ def latest_scan() -> tuple[dict, Path] | None:
     if not files:
         return None
     data = json.loads(files[0].read_text(encoding='utf-8'))
+    if data.get('scan_date') != completed_session():
+        return None
     txt = files[0].with_suffix('.txt')
     return data, (txt if txt.exists() else None)
 
@@ -47,6 +50,11 @@ def build_summary(scan: dict) -> str:
         L.append('  ⚠ 확률 모델 미학습 — 기술점수 단독 순위입니다.')
     else:
         L.append(f'  게이트: {scan.get("gate_note", "")}')
+    if (scan.get('portfolio') or {}).get('blocked_reason'):
+        L.append(scan['portfolio']['blocked_reason'])
+    if scan.get('regime_note'):
+        L.append(scan['regime_note'])
+    L.append('가격은 신호 종가 참고값. 다음 거래일 실제 체결가로 목표·손절을 다시 계산하세요.')
     L.append('')
 
     if elite:
