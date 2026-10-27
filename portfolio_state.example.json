@@ -1,0 +1,6 @@
+{
+  "as_of_session": "2026-10-26",
+  "positions": [
+    {"ticker": "EXAMPLE", "weight": 0.10, "stop_pct": 0.15}
+  ]
+}

@@ -10,3 +10,5 @@ __pycache__/
 # 주의: v1과 달리 *.json / *.pkl 을 통째로 무시하지 않는다.
 # surge_model.pkl, predictions/, tracker_stats.json 은 커밋 대상 —
 # 리포지토리만으로 시스템이 재현 가능해야 한다.
+portfolio_state.json
+.venv/
