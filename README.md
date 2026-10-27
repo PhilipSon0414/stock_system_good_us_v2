@@ -12,12 +12,13 @@ Python 3.10 이상:
 pip install -r requirements.txt
 python surge_model.py train
 python pattern_miner.py
-python daily_scan.py ALL
+python scheduled_scan.py --prepare
+python daily_scan.py ALL  # 기존 예약 명령도 자동 모델 준비 경로를 사용
 python -m unittest discover -s tests -v
 ```
 
 기존 `surge_model.pkl`과 `pattern_rules.json`은 새 검증 방식으로 생성된 파일이
-아니므로 사용하지 않는다. 위 명령으로 재학습/재생성해야 한다. 모델이 없거나
+아니므로 사용하지 않는다. 기존 `python daily_scan.py ALL` 명령은 `scheduled_scan.py`로 연결된다. 예약 지시문의 기존 명령을 바꾸지 않아도 최초 실행 시 호환 모델/규칙을 자동 생성하고 모델은 7일, 규칙은 30일마다 갱신한다. Git checkout 시각이 아니라 저장된 학습 시각으로 판단한다. `--prepare`는 학습만 하며 발송하지 않고, `--check`는 준비 상태만 확인한다. 학습 실패 시 불완전한 결과를 발행하지 않는다. 모델이 없거나
 호환되지 않으면 기술점수 관찰 목록만 출력하며 엘리트픽/신규 비중을 추천하지 않는다.
 이번 코드 수정은 과거 성과가 개선됐다는 실증 결과가 아니다.
 
@@ -26,7 +27,7 @@ python -m unittest discover -s tests -v
 - `America/New_York` 거래소 달력으로 휴장일, 조기 마감, 서머타임을 처리한다.
 - 마감 후 30분이 지난 마지막 세션만 사용한다. 실행 시각(UTC)과 시세 기준일을
   별도 저장한다. 종목별 최신 일봉이 기준일과 다르거나 불완전하면 제외 사유를 남긴다.
-- 기존 스케줄러가 한국시간 **화~토 06:45**에 `python daily_scan.py ALL`을 실행하도록
+- 기존 스케줄러가 기존 한국시간 **화~토 07:00**에 `python scheduled_scan.py ALL`을 실행하도록
   설정하면 서머타임과 표준시간 모두 정규장 마감 후 실행된다. 이 저장소가 외부
   스케줄러를 설치하거나 변경하지는 않는다. 거래소 기준 마감+30분 실행도 가능하다.
 - 같은 거래일의 저장된 리포트가 있으면 다시 발송하지 않는다. 휴일에도 같은 결과를

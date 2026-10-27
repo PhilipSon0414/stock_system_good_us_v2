@@ -896,4 +896,8 @@ def main(market: str = 'ALL', scan_date: str | None = None):
 if __name__ == '__main__':
     market_arg = sys.argv[1] if len(sys.argv) > 1 else 'ALL'
     date_arg   = sys.argv[2] if len(sys.argv) > 2 else None
-    main(market_arg, scan_date=date_arg)
+    if date_arg is not None and resolve_session(date_arg) != resolve_session():
+        raise ValueError('과거 날짜 운영 스캔은 지원하지 않습니다.')
+    # Preserve the existing scheduled CLI while ensuring compatible artifacts.
+    from scheduled_scan import main as scheduled_main
+    scheduled_main([market_arg])

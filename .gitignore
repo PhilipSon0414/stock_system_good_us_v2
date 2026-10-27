@@ -12,3 +12,4 @@ __pycache__/
 # 리포지토리만으로 시스템이 재현 가능해야 한다.
 portfolio_state.json
 .venv/
+logs/

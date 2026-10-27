@@ -31,7 +31,9 @@ v1의 스테이지 분류 모델을 폐기하고 목표에 직결되는 이진 �
 import sys
 import pickle
 import warnings
-from datetime import datetime
+import os
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 warnings.filterwarnings('ignore')
@@ -243,15 +245,23 @@ def train_and_save(data: pd.DataFrame, objective: str = 'touch') -> dict:
     fit = _fit_calibrated(data)
     payload = {**fit,
                'target': SURGE_TARGET, 'horizon': SURGE_HORIZON,
-               'trained_at': datetime.now().isoformat(),
+               'trained_at': datetime.now(timezone.utc).isoformat(),
                'n_rows': len(data), 'schema_version': MODEL_SCHEMA,
                'training_last_signal': str(data['date'].max()),
                'validation': 'purged_fit_calibration_selection', 'objective': objective,
                'execution_version': VERSION if objective == 'trade_target' else None,
                'execution_policy_template': policy() if objective == 'trade_target' else None}
     destination = MODEL_PATH if objective == 'touch' else TRADE_MODEL_PATH
-    with open(destination, 'wb') as f:
-        pickle.dump(payload, f)
+    fd, temporary = tempfile.mkstemp(dir=destination.parent, prefix='.model-')
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            pickle.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, destination)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
     print(f'\n  모델 저장: {destination}')
     print(f'  샘플 {len(data)}건  base rate {fit["base_rate"]:.1%}'
           f'  임계값 {fit["threshold"]:.2f}')

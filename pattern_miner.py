@@ -26,7 +26,7 @@
 import json
 import sys
 import warnings
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 warnings.filterwarnings('ignore')
@@ -40,6 +40,7 @@ from indicators import add_all, MODEL_FEATURES
 from surge_model import add_trend_deltas
 from data_fetcher import get_ohlcv, FetchLog
 from universe import get_ticker_list
+from storage import write_text
 from validation import purged_split
 from market_clock import completed_bars, completed_session
 
@@ -378,12 +379,12 @@ def main():
         print(f'\n  리포트 저장: {path}')
         all_rules += rules
 
-    RULES_PATH.write_text(json.dumps({
+    write_text(RULES_PATH, json.dumps({
         'schema_version': 2,
-        'generated_at': datetime.now().isoformat(),
+        'generated_at': datetime.now(timezone.utc).isoformat(),
         'target': SURGE_TARGET,
         'rules': all_rules,
-    }, ensure_ascii=False, indent=2), encoding='utf-8')
+    }, ensure_ascii=False, indent=2))
     print(f'\n  규칙 저장: {RULES_PATH} ({len(all_rules)}개 — daily_scan이 자동 사용)')
 
 
