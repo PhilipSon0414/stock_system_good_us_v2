@@ -272,8 +272,12 @@ def load_model(objective: str = 'touch') -> dict | None:
     path = MODEL_PATH if objective == 'touch' else TRADE_MODEL_PATH
     if not path.exists():
         return None
-    with open(path, 'rb') as f:
-        payload = pickle.load(f)
+    try:
+        with open(path, 'rb') as f:
+            payload = pickle.load(f)
+    except Exception as e:
+        print(f'  ⚠ 모델 재학습 필요: 저장된 모델을 읽을 수 없음 ({type(e).__name__}: {e})')
+        return None
     if (payload.get('schema_version') != MODEL_SCHEMA or
             payload.get('objective') != objective or
             (objective == 'trade_target' and payload.get('execution_policy_template') != policy()) or
