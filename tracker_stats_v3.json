@@ -1,24 +1,24 @@
 {
-  "updated_at": "2026-11-20T21:37:33.928286",
+  "updated_at": "2026-11-23T21:37:32.900176",
   "execution_version": "next_open_v1",
   "target": 0.1,
   "primary_horizon": 20,
   "horizons": {
     "10": {
-      "n_evaluated": 118,
-      "hit_rate": 0.263,
-      "avg_end_return": -0.0672,
-      "median_end_return": -0.0929,
-      "avg_max_dd": -0.1495,
+      "n_evaluated": 148,
+      "hit_rate": 0.291,
+      "avg_end_return": -0.0691,
+      "median_end_return": -0.0902,
+      "avg_max_dd": -0.1517,
       "rule": {
-        "win_rate": 0.263,
-        "avg_return": -0.0611,
-        "std_return": 0.1007,
-        "target_rate": 0.169,
-        "stop_rate": 0.407,
-        "time_rate": 0.356,
+        "win_rate": 0.297,
+        "avg_return": -0.0521,
+        "std_return": 0.1043,
+        "target_rate": 0.203,
+        "stop_rate": 0.392,
+        "time_rate": 0.338,
         "d3_rate": 0.068,
-        "stopped_before_hit": 0.194
+        "stopped_before_hit": 0.14
       },
       "buckets": [
         {
@@ -30,23 +30,23 @@
         {
           "prob_min": 0.35,
           "prob_max": 0.5,
-          "n": 12,
+          "n": 14,
           "hit_rate": 0.0
         },
         {
           "prob_min": 0.5,
           "prob_max": 0.65,
-          "n": 42,
-          "hit_rate": 0.31
+          "n": 54,
+          "hit_rate": 0.315
         },
         {
           "prob_min": 0.65,
           "prob_max": 1.01,
-          "n": 63,
-          "hit_rate": 0.286
+          "n": 79,
+          "hit_rate": 0.329
         }
       ],
-      "n_independent": 60,
+      "n_independent": 64,
       "buckets_independent": [
         {
           "prob_min": 0.25,
@@ -63,33 +63,33 @@
         {
           "prob_min": 0.5,
           "prob_max": 0.65,
-          "n": 18,
-          "hit_rate": 0.167
+          "n": 20,
+          "hit_rate": 0.15
         },
         {
           "prob_min": 0.65,
           "prob_max": 1.01,
-          "n": 31,
-          "hit_rate": 0.161
+          "n": 33,
+          "hit_rate": 0.152
         }
       ],
       "rule_elite": {
-        "n": 4,
+        "n": 6,
         "win_rate": 0.5,
-        "avg_return": -0.0048,
-        "std_return": 0.1246
+        "avg_return": -0.0029,
+        "std_return": 0.1224
       }
     }
   },
   "recent": {
     "horizon": 10,
-    "n_scans": 4,
-    "n": 118,
+    "n_scans": 5,
+    "n": 148,
     "from": "2026-10-29",
-    "to": "2026-11-05",
-    "hit_rate": 0.263,
-    "rule_win_rate": 0.263,
-    "rule_avg_return": -0.0611
+    "to": "2026-11-09",
+    "hit_rate": 0.291,
+    "rule_win_rate": 0.297,
+    "rule_avg_return": -0.0521
   },
   "n_evaluated": 0,
   "overall_hit_rate": null,
