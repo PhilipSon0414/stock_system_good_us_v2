@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-11-25T21:37:49.336126",
+  "updated_at": "2026-11-27T21:37:33.791827",
   "execution_version": "next_open_v1",
   "target": 0.1,
   "primary_horizon": 20,
@@ -79,6 +79,70 @@
         "avg_return": -0.0306,
         "std_return": 0.1102
       }
+    },
+    "20": {
+      "n_evaluated": 30,
+      "hit_rate": 0.2,
+      "avg_end_return": -0.1385,
+      "median_end_return": -0.1659,
+      "avg_max_dd": -0.2786,
+      "rule": {
+        "win_rate": 0.133,
+        "avg_return": -0.1062,
+        "std_return": 0.0916,
+        "target_rate": 0.133,
+        "stop_rate": 0.733,
+        "time_rate": 0.0,
+        "d3_rate": 0.133,
+        "stopped_before_hit": 0.333
+      },
+      "buckets": [
+        {
+          "prob_min": 0.35,
+          "prob_max": 0.5,
+          "n": 1,
+          "hit_rate": 0.0
+        },
+        {
+          "prob_min": 0.5,
+          "prob_max": 0.65,
+          "n": 8,
+          "hit_rate": 0.25
+        },
+        {
+          "prob_min": 0.65,
+          "prob_max": 1.01,
+          "n": 21,
+          "hit_rate": 0.19
+        }
+      ],
+      "n_independent": 30,
+      "buckets_independent": [
+        {
+          "prob_min": 0.35,
+          "prob_max": 0.5,
+          "n": 1,
+          "hit_rate": 0.0
+        },
+        {
+          "prob_min": 0.5,
+          "prob_max": 0.65,
+          "n": 8,
+          "hit_rate": 0.25
+        },
+        {
+          "prob_min": 0.65,
+          "prob_max": 1.01,
+          "n": 21,
+          "hit_rate": 0.19
+        }
+      ],
+      "rule_elite": {
+        "n": 2,
+        "win_rate": 0.0,
+        "avg_return": -0.1286,
+        "std_return": 0.0214
+      }
     }
   },
   "recent": {
@@ -91,7 +155,26 @@
     "rule_win_rate": 0.274,
     "rule_avg_return": -0.0591
   },
-  "n_evaluated": 0,
-  "overall_hit_rate": null,
-  "buckets": []
+  "n_evaluated": 30,
+  "overall_hit_rate": 0.2,
+  "buckets": [
+    {
+      "prob_min": 0.35,
+      "prob_max": 0.5,
+      "n": 1,
+      "hit_rate": 0.0
+    },
+    {
+      "prob_min": 0.5,
+      "prob_max": 0.65,
+      "n": 8,
+      "hit_rate": 0.25
+    },
+    {
+      "prob_min": 0.65,
+      "prob_max": 1.01,
+      "n": 21,
+      "hit_rate": 0.19
+    }
+  ]
 }
