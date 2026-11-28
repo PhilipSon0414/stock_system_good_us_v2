@@ -28,7 +28,7 @@ daily_scan.py의 CLI가 scheduled_scan.py를 통해 호환 모델을 준비한�
 - 현재 실행의 `reports/<미국거래일>_scan.json`과 동일 이름 txt를 사용한다.
 - 새 성과는 `tracker_stats_v3.json`, 매집 성과는 `quiet_stats_v3.json`에서 읽는다.
   예측 이력은 `predictions/v3/`이다.
-- 운용 규칙(trend_v1: 손절 -7% → +15% 절반 익절·손절 본전 → 20일선 종가 이탈 시 청산)의
+- 운용 규칙(trend_v1: 손절 -7% → +15% 절반 익절·손절 본전 → 10일선 종가 이탈 시 청산)의
   모의 성과는 `trend_stats_v3.json`에서 읽는다. `tracker_stats_v3.json`은 기존 규칙
   (+12% 익절 / ATR 손절 / 20일) 기준이므로 두 수치를 섞지 않는다.
 - 루트의 예전 tracker_stats.json 및 predictions/*.jsonl은 과거 기준의 보존 자료다.
@@ -91,7 +91,7 @@ daily_scan.py의 CLI가 scheduled_scan.py를 통해 호환 모델을 준비한�
    | 티커 | 신호 종가 | 손절(-7%) | 절반 매도 지정가(+15%) | 이후 |
    |---|---|---|---|---|
 
-   JSON coaching의 plan_* 값을 사용한다. '이후' 칸은 '손절을 본전으로, 20일선 종가
+   JSON coaching의 plan_* 값을 사용한다. '이후' 칸은 '손절을 본전으로, 10일선 종가
    이탈 시 다음 시가 매도'. 표의 가격은 신호 종가 기준이며 다음 거래일 실제 체결가로
    다시 계산한다고 알린다. coaching의 target/stop/d3_* 값은 기존 규칙 비교용이므로
    운용 지침으로 쓰지 않는다. 대상이 없으면 '코칭 대상 없음'.
