@@ -34,7 +34,8 @@ import pandas as pd
 import vcp_strategy as vcp
 from config import (SURGE_HORIZON, MIN_PRICE, MIN_AVG_VOLUME, TECH_SCORE_GATE, FINAL_MIN_SCORE,
                     W_SCORE, W_MODEL, MIN_TRAIN_ROWS, ELITE_MAX_ATR, ELITE_MAX_BB_EXPANSION,
-                    ELITE_MAX_DROP_20D_HIGH, ELITE_MAX_ABOVE_MA200)
+                    ELITE_MAX_DROP_20D_HIGH, ELITE_MAX_ABOVE_MA200,
+                    PORTFOLIO_MAX_POSITIONS, PORTFOLIO_RISK_PER_TRADE, PORTFOLIO_MAX_DEPLOY)
 from data_fetcher import get_ohlcv, FetchLog
 from execution import simulate as execute, policy
 from indicators import add_all
@@ -151,7 +152,7 @@ def exit_existing(df: pd.DataFrame, i: int, meta: dict) -> dict | None:
     if ev is None:
         return None
     hold = int(np.searchsorted(df.index.values, np.datetime64(ev['exit_date']))) - i
-    return {**ev, 'hold_days': hold}
+    return {**ev, 'hold_days': hold, 'stop_pct': policy(df['ATRRel'].iat[i])['stop_pct']}
 
 
 def make_exit_vcp(params: dict):
@@ -176,7 +177,8 @@ def run_trades(tickers, frames, candidates, accept, exit_fn, start) -> list[dict
             if ev is None or 'skipped' in ev:
                 continue
             busy_until = i + ev['hold_days']
-            trades.append({'ticker': t, 'signal_date': str(df.index[i].date()), **ev})
+            trades.append({'ticker': t, 'signal_date': str(df.index[i].date()),
+                           'prob': meta.get('prob'), **ev})
     return trades
 
 
@@ -239,6 +241,43 @@ def boot_diff(a: list[dict], b: list[dict], n_boot: int = 2000, seed: int = 7) -
     return {'win_rate_diff_ci90': q(dw), 'avg_return_diff_ci90': q(dm)}
 
 
+def portfolio_sim(trades: list[dict], stop_pct: float | None, max_pos: int = PORTFOLIO_MAX_POSITIONS,
+                  risk: float = PORTFOLIO_RISK_PER_TRADE, max_deploy: float = PORTFOLIO_MAX_DEPLOY) -> dict:
+    """슬롯·투입 한도를 둔 계좌 단위 근사. 비중 = 리스크 한도 / 손절폭, 같은 날은 확률 높은 순.
+    손익은 청산일에 실현 반영(보유 중 평가손익은 낙폭에 잡히지 않는다)."""
+    if not trades:
+        return {'n': 0}
+    order = sorted(trades, key=lambda t: (t['entry_date'], -(t.get('prob') or 0)))
+    equity, peak, mdd, open_pos, taken = 1.0, 1.0, 0.0, [], 0
+    def settle(until):
+        nonlocal equity, peak, mdd, open_pos
+        for pos in sorted([p for p in open_pos if p['exit'] < until], key=lambda p: p['exit']):
+            equity += pos['w'] * pos['ret']
+            peak = max(peak, equity); mdd = min(mdd, equity / peak - 1)
+        open_pos = [p for p in open_pos if p['exit'] >= until]
+    for t in order:
+        settle(t['entry_date'])
+        sp = stop_pct if stop_pct is not None else policy_stop(t)
+        w = equity * risk / sp
+        used = sum(p['w'] for p in open_pos)
+        if len(open_pos) >= max_pos or any(p['ticker'] == t['ticker'] for p in open_pos):
+            continue
+        w = min(w, equity * max_deploy - used)
+        if w <= 1e-9:
+            continue
+        open_pos.append({'ticker': t['ticker'], 'exit': t['exit_date'], 'w': w, 'ret': t['rule_return']})
+        taken += 1
+    settle('9999')
+    years = (pd.Timestamp(order[-1]['exit_date']) - pd.Timestamp(order[0]['entry_date'])).days / 365.25
+    return {'n_taken': taken, 'total_return': round(equity - 1, 4),
+            'cagr': round(equity ** (1 / years) - 1, 4) if years > 0 and equity > 0 else None,
+            'max_drawdown_realized': round(mdd, 4)}
+
+
+def policy_stop(t: dict) -> float:
+    return t.get('stop_pct') or 0.15
+
+
 def fmt(name: str, s: dict) -> str:
     if not s.get('n'):
         return f'{name:<34} n=0'
@@ -260,7 +299,12 @@ def main():
     print(f'종목 {len(data)}개(매매 대상 {len(scan_universe)}개), 기간 {BT_PERIOD}')
 
     frames, panel = build_frames(data)
-    probs, folds = walk_forward_probs(panel, args.step)
+    probs_cache = args.cache.with_name(f'{args.cache.stem}_probs_{args.step}.pkl')
+    if probs_cache.exists() and not args.refresh:
+        probs, folds = pickle.loads(probs_cache.read_bytes())
+    else:
+        probs, folds = walk_forward_probs(panel, args.step)
+        probs_cache.write_bytes(pickle.dumps((probs, folds)))
     start = probs['date'].min()
     print(f'표본 외 평가 구간: {start.date()} ~ {probs["date"].max().date()}')
 
@@ -324,6 +368,21 @@ def main():
     diffs = {'VCP 기본 - 기존 엘리트': boot_diff(base, ref),
              'VCP 기본 - 기존 게이트': boot_diff(base, results['기존 게이트 통과 / 기존 청산']),
              'VCP 기본 - 기존 엘리트(시장필터)': boot_diff(base, results['기존 엘리트 / 기존 청산 (시장필터)'])}
+    diffs['엘리트 신호: VCP 청산 - 기존 청산'] = boot_diff(results['기존 엘리트 신호 / VCP 청산'], ref)
+    diffs['게이트 신호: VCP 청산 - 기존 청산'] = boot_diff(results['기존 게이트 신호 / VCP 청산'],
+                                               results['기존 게이트 통과 / 기존 청산'])
+    for name, p2 in (('손절5%', {**P, 'stop_pct': 0.05}), ('20일선 처음부터', {**P, 'trail_from_start': True}),
+                     ('손절10%', {**P, 'stop_pct': 0.10}), ('익절20%', {**P, 'partial_at': 0.20})):
+        record(f'기존 엘리트 신호 / VCP 청산({name})', run_trades(
+            scan_universe, frames, ex_elite, existing.accept,
+            lambda df, i, meta, p2=p2: vcp.simulate_exit(df, i, p2, None), start))
+    ports = {'기존 엘리트 / 기존 청산': portfolio_sim(ref, None),
+             '기존 엘리트 신호 / VCP 청산': portfolio_sim(results['기존 엘리트 신호 / VCP 청산'], P['stop_pct'])}
+    print('\n── 계좌 단위 근사 (최대 4종목, 종목당 위험 1.5%, 투입 40%) ──')
+    for k, v in ports.items():
+        print(f'  {k}: {v}')
+    print('\n── 연도별: 엘리트 신호 + VCP 청산 ──')
+    print(' ', by_year(results['기존 엘리트 신호 / VCP 청산']))
     print('\n── 차이의 90% 신뢰구간 (월 블록 부트스트랩) ──')
     for k, v in diffs.items():
         print(f'  {k}: {v}')
@@ -345,7 +404,8 @@ def main():
         'vcp_version': vcp.VERSION, 'vcp_params': P, 'walk_forward_step': args.step,
         'folds': folds,
         'summary': {k: stats(v) for k, v in results.items()},
-        'by_year': {k: by_year(results[k]) for k in ('VCP 기본', '기존 엘리트 / 기존 청산', '기존 게이트 통과 / 기존 청산')},
+        'by_year': {k: by_year(results[k]) for k in ('VCP 기본', '기존 엘리트 / 기존 청산', '기존 게이트 통과 / 기존 청산', '기존 엘리트 신호 / VCP 청산')},
+        'portfolio_sim': ports,
         'by_regime': {k: by_regime(results[k], mkt) for k in ('VCP 시장필터 없음', '기존 엘리트 / 기존 청산', '기존 게이트 통과 / 기존 청산')},
         'diff_ci90': diffs, 'recent_vcp_signals': open_vcp,
         'trades': {k: results[k] for k in ('VCP 기본', '기존 엘리트 / 기존 청산')},

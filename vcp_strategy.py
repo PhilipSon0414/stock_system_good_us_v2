@@ -160,45 +160,65 @@ def find_signals(df: pd.DataFrame, rs: pd.Series, mkt: pd.Series | None,
     return out
 
 
+def walk_exit(o, h, l, c, ma, e: int, entry: float, p: dict = PARAMS, first_barrier: int | None = None) -> dict:
+    """e번째 봉에서 entry에 진입한 포지션을 마지막 봉까지 규칙대로 진행시킨 상태.
+    백테스트(simulate_exit)와 일일 보유 점검(position_monitor)이 같은 규칙을 쓰도록 공유한다.
+    first_barrier: 손절·익절 가격 판정을 시작할 봉(기본 e). 장중 체결 시각을 모르면 e+1.
+    반환 closed=False면 아직 보유 중이며 trail_pending은 다음 거래일 시가 청산 예정을 뜻한다."""
+    slip, fee = p['slippage_bps'] / 1e4, p['fee_bps'] / 1e4
+    stop, trigger = entry * (1 - p['stop_pct']), entry * (1 + p['partial_at'])
+    cost = entry * (1 + fee)
+    legs, remaining, partial, partial_j, pending, reason = [], 1.0, False, None, None, None
+    first_barrier = e if first_barrier is None else first_barrier
+    n, j = len(c), e
+    while j < n:
+        barrier = j >= first_barrier
+        if barrier and j > e and o[j] <= stop:
+            legs.append((remaining, o[j] * (1 - slip))); reason = 'stop'; break
+        if pending and j > e:
+            legs.append((remaining, o[j] * (1 - slip))); reason = pending; break
+        if barrier and l[j] <= stop:
+            legs.append((remaining, stop * (1 - slip))); reason = 'stop'; break
+        if barrier and not partial and h[j] >= trigger:
+            legs.append((p['partial_frac'], trigger))
+            remaining -= p['partial_frac']
+            partial, partial_j, stop = True, j, entry
+        if (partial or p['trail_from_start']) and np.isfinite(ma[j]) and c[j] < ma[j]:
+            pending = 'trail'
+        elif j - e + 1 >= p['max_hold']:
+            pending = 'time'
+        j += 1
+    realized = sum(w * (px * (1 - fee) / cost - 1) for w, px in legs)
+    if reason is None:
+        last = n - 1
+        return {'closed': False, 'partial': partial, 'partial_index': partial_j, 'stop': float(stop),
+                'trigger': float(trigger), 'pending': pending, 'remaining': remaining,
+                'realized': float(realized), 'last_index': last,
+                'open_return': float(realized + remaining * (c[last] / entry - 1)),
+                'max_gain': float(h[e:].max() / entry - 1)}
+    if reason == 'stop' and partial:
+        reason = 'breakeven'
+    return {'closed': True, 'exit_index': j, 'rule_return': float(realized), 'rule_outcome': reason,
+            'partial': partial, 'partial_index': partial_j,
+            'max_gain': float(h[e:j + 1].max() / entry - 1)}
+
+
 def simulate_exit(df: pd.DataFrame, i: int, p: dict = PARAMS, pivot: float | None = None) -> dict | None:
-    """i일 종가 신호 → i+1일 시가 진입 후 VCP 청산 규칙 적용.
+    """i일 종가 신호 → i+1일 시가 진입 후 청산 규칙 적용.
     반환 None: 데이터 부족으로 청산까지 관찰하지 못함. {'skipped': ...}: 추격 금지로 미진입."""
     o, h, l, c = (df[k].to_numpy(dtype=float) for k in ('Open', 'High', 'Low', 'Close'))
     ma = df['Close'].rolling(p['trail_ma']).mean().to_numpy()
-    n, e = len(df), i + 1
-    if e >= n:
+    e = i + 1
+    if e >= len(df):
         return None
     if pivot is not None and o[e] > pivot * (1 + p['max_chase']):
         return {'skipped': 'gap_above_chase_limit'}
-    slip, fee = p['slippage_bps'] / 1e4, p['fee_bps'] / 1e4
-    entry = o[e] * (1 + slip)
-    stop, trigger = entry * (1 - p['stop_pct']), entry * (1 + p['partial_at'])
-    cost = entry * (1 + fee)
-    legs, remaining, partial, trail_pending, reason = [], 1.0, False, False, None
-    j = e
-    while j < n:
-        if o[j] <= stop:
-            legs.append((remaining, o[j] * (1 - slip))); reason = 'stop'; break
-        if trail_pending:
-            legs.append((remaining, o[j] * (1 - slip))); reason = 'trail'; break
-        if j - e >= p['max_hold']:
-            legs.append((remaining, o[j] * (1 - slip))); reason = 'time'; break
-        if l[j] <= stop:
-            legs.append((remaining, stop * (1 - slip))); reason = 'stop'; break
-        if not partial and h[j] >= trigger:
-            legs.append((p['partial_frac'], trigger))
-            remaining -= p['partial_frac']
-            partial, stop = True, entry
-        if (partial or p['trail_from_start']) and np.isfinite(ma[j]) and c[j] < ma[j]:
-            trail_pending = True
-        j += 1
-    if reason is None:
+    entry = o[e] * (1 + p['slippage_bps'] / 1e4)
+    st = walk_exit(o, h, l, c, ma, e, entry, p)
+    if not st['closed']:
         return None
-    ret = sum(w * (px * (1 - fee) / cost - 1) for w, px in legs)
-    if reason == 'stop' and partial:
-        reason = 'breakeven'
+    j = st['exit_index']
     return {'entry_date': str(df.index[e].date()), 'exit_date': str(df.index[j].date()),
-            'entry_price': float(entry), 'rule_return': round(float(ret), 6),
-            'rule_outcome': reason, 'partial': partial, 'hold_days': int(j - e + 1),
-            'max_gain': round(float(h[e:j + 1].max() / entry - 1), 4),
-            'execution_version': VERSION}
+            'entry_price': float(entry), 'rule_return': round(st['rule_return'], 6),
+            'rule_outcome': st['rule_outcome'], 'partial': st['partial'], 'hold_days': int(j - e + 1),
+            'max_gain': round(st['max_gain'], 4), 'execution_version': VERSION}

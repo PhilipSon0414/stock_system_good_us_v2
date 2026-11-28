@@ -1,6 +1,7 @@
 {
   "as_of_session": "2026-10-26",
   "positions": [
-    {"ticker": "EXAMPLE", "weight": 0.10, "stop_pct": 0.15}
+    {"ticker": "EXAMPLE", "weight": 0.10, "stop_pct": 0.07,
+     "entry_date": "2026-10-20", "entry_price": 123.45, "shares": 10}
   ]
 }

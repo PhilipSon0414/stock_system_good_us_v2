@@ -48,7 +48,8 @@ from config import (MIN_PRICE, MIN_AVG_VOLUME, TECH_SCORE_GATE, FINAL_MIN_SCORE,
                     QUIET_BOX_MIN, QUIET_UPDN_MIN,
                     REGIME_WARN_HIT, REGIME_HALT_HIT,
                     ELITE_MAX_ATR, ELITE_MAX_BB_EXPANSION, ELITE_MAX_DROP_20D_HIGH,
-                    ELITE_MAX_ABOVE_MA200, ELITE_EARNINGS_BLACKOUT)
+                    ELITE_MAX_ABOVE_MA200, ELITE_EARNINGS_BLACKOUT,
+                    TREND_STOP_PCT, TREND_PARTIAL_AT, TREND_PARTIAL_FRAC, TREND_TRAIL_MA)
 from universe import get_ticker_list
 from data_fetcher import (get_ohlcv, get_info, short_signal, fmt_market_cap,
                           FetchLog)
@@ -60,6 +61,7 @@ from pattern_miner import load_rules, match_rules
 from email_sender import send_report
 import tracker
 import quiet_tracker
+import position_monitor
 
 HERE = Path(__file__).parent
 REPORTS_DIR = HERE / 'reports'
@@ -295,6 +297,14 @@ def build_coaching(results: list, elite: list, scan_date: str) -> list[dict]:
             'd3_cut': round(p * (1 - cut_pct), 2),
             'hold_days': COACH_HOLD_DAYS,
             **dates,
+            # 운용 규칙(trend_v1): 위 target/stop/d3_*는 기존 규칙 비교용으로만 남긴다
+            'plan': position_monitor.VERSION,
+            'plan_stop_pct': round(TREND_STOP_PCT * 100, 1),
+            'plan_stop': round(p * (1 - TREND_STOP_PCT), 2),
+            'plan_partial_pct': round(TREND_PARTIAL_AT * 100, 1),
+            'plan_partial_price': round(p * (1 + TREND_PARTIAL_AT), 2),
+            'plan_partial_fraction': TREND_PARTIAL_FRAC,
+            'plan_trail_ma': TREND_TRAIL_MA,
         })
     return out
 
@@ -386,13 +396,14 @@ def build_portfolio(elite: list[dict], regime: str,
 
     rows, deploy = [], 0.0
     for r in chosen:
-        stop_pct = coaching_stop_pct(r.get('atr_rel'))
+        stop_pct = TREND_STOP_PCT
         weight = PORTFOLIO_RISK_PER_TRADE / stop_pct * scale
         deploy += weight
         rows.append({'ticker': r['ticker'], 'name': r['name'],
                      'price': round(r['price'], 2),
                      'weight': round(weight, 4),
-                     'target': round(r['price'] * (1 + COACH_TARGET), 2),
+                     'target': round(r['price'] * (1 + TREND_PARTIAL_AT), 2),
+                     'target_note': f'+{TREND_PARTIAL_AT*100:.0f}%에서 {TREND_PARTIAL_FRAC*100:.0f}% 매도',
                      'stop': round(r['price'] * (1 - stop_pct), 2),
                      'stop_pct': round(stop_pct * 100, 1),
                      'loss_if_stopped': round(weight * stop_pct, 4)})
@@ -447,7 +458,7 @@ def _portfolio_lines(p: dict, sep2: str) -> list[str]:
         L.append('  ⛔ 신규 진입 보류 — 추가 투입 0%. 기존 보유 현황은 별도 유지됩니다.')
         L.append(sep2)
         return L
-    L.append(f'  {"티커":<7} {"비중":>6} {"매수가":>10} {"익절":>10} {"손절":>10}'
+    L.append(f'  {"티커":<7} {"비중":>6} {"매수가":>10} {"절반익절":>10} {"손절":>10}'
              f' {"손절시손실":>9}')
     for r in p['positions']:
         L.append(f'  {r["ticker"]:<7} {r["weight"]*100:>5.1f}% ${r["price"]:>9.2f}'
@@ -486,7 +497,8 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
                  regime: str | None = None,
                  excluded: list | None = None,
                  portfolio: dict | None = None,
-                 quiet: list | None = None) -> str:
+                 quiet: list | None = None,
+                 tracking: dict | None = None) -> str:
     sep, sep2 = '═' * 70, '─' * 70
     L = [sep,
          f'  미국 주식 +{SURGE_TARGET*100:.0f}% 급등 후보 스캔 (v2)',
@@ -564,7 +576,12 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
     L.append(sep2)
     L.append('')
 
-    # 실전 코칭 (운용 규칙 — 실제 픽 실측 기반, config.py 코칭 섹션)
+    # 보유·추천 종목 점검 — 신규 추천보다 먼저: 이미 산 종목의 내일 행동
+    if tracking:
+        L += position_monitor.report_lines(tracking, sep2)
+        L.append('')
+
+    # 실전 코칭 (운용 규칙 trend_v1 — config.py 추세 추종 청산 섹션)
     if coaching:
         L.append('  [ 실전 코칭 — 1순위 (엘리트픽 ∩ 전조패턴, 최대 3종목) ]')
         L.append(sep2)
@@ -576,14 +593,11 @@ def build_report(results: list, elite: list, market: str, model_ok: bool,
                       if c.get('days_to_earnings') is not None else '  실적 미정')
             L.append(f'  ▸ {c["ticker"]} {c["name"][:24]} — 현재가 ${c["price"]:.2f}'
                      f'  (ATR {c["atr_pct"]:.1f}%){earn_s}')
-            L.append(f'      매수 시 동시 주문: 목표 ${c["target"]:.2f} (+{COACH_TARGET*100:.0f}% GTC 지정가)'
-                     f' | 손절 ${c["stop"]:.2f} (-{c["stop_pct"]:.1f}% = 3×ATR)')
-            L.append(f'      D+3({c["d3"]}) 종가 점검: ${c["d3_strong"]:.2f}↑ 강홀드'
-                     f' / ${c["d3_hold"]:.2f}↑ 홀드'
-                     f' / ${c["d3_watch"]:.2f}~${c["d3_hold"]:.2f} 관망'
-                     f' / ${c["d3_cut"]:.2f}↓ 다음 거래일 시가 정리(-{c["d3_cut_pct"]:.1f}%)')
-            L.append(f'      D+10({c["d10"]})까지 미터치면 보유 조건 재점검'
-                     f' → 손절 유지, D+{c["hold_days"]}({c["d20"]}) 정리')
+            L.append(f'      매수 시 동시 주문: 손절 ${c["plan_stop"]:.2f} (-{c["plan_stop_pct"]:.0f}%)'
+                     f' | 절반 매도 지정가 ${c["plan_partial_price"]:.2f} (+{c["plan_partial_pct"]:.0f}%)')
+            L.append(f'      절반 체결 뒤: 손절을 매수가(본전)로 올리고, 종가가 {c["plan_trail_ma"]}일선 아래로'
+                     ' 마감하면 다음 거래일 시가에 나머지 매도')
+            L.append('      그 전까지 매일 할 일 없음 — 진행 상태는 다음 날부터 [보유·추천 종목 점검]에 표시')
         L.append(sep2)
         L.append(f'  ※ 실적 발표 {ELITE_EARNINGS_BLACKOUT}일 내 종목은 엘리트에서 자동 제외됨 —'
                  ' 그 이후 날짜라도 보유 중 발표면 발표 전 정리 고려.')
@@ -808,6 +822,9 @@ def _main(market: str = 'ALL', scan_date: str | None = None):
     if model_ok:
         apply_gate(results, gate)
 
+    # 과거 추천·내 보유의 진행 상태 (오늘 픽은 아직 기록 전이라 내일부터 잡힌다)
+    tracking = position_monitor.run(date_str)
+
     elite, excluded = get_elite_picks(results, model_ok)
     coaching = build_coaching(results, elite, date_str)
     recent = tracker.recent_performance()
@@ -816,9 +833,9 @@ def _main(market: str = 'ALL', scan_date: str | None = None):
     portfolio = build_portfolio(elite, regime_state(recent),
                                 tracker.rule_expectation(PORTFOLIO_MIN_ELITE_N), state, state_note)
     report = build_report(results, elite, market, model_ok, gate_note, log,
-                          date_str, coaching, regime, excluded, portfolio, quiet)
+                          date_str, coaching, regime, excluded, portfolio, quiet, tracking)
     report += '\n※ 가격표는 신호 종가 기준 참고값입니다. 다음 거래일 실제 체결가로 목표·손절을 다시 계산하세요.\n'
-    report += '※ 성과는 다음 시가 진입, 비용·갭·D+3 정리를 반영한 모의 결과이며 계좌 체결 내역이 아닙니다.\n'
+    report += '※ 성과는 다음 시가 진입, 비용·갭을 반영한 모의 결과이며 계좌 체결 내역이 아닙니다.\n'
     print('\n' + report)
 
     # 저장 (텍스트 리포트 + 요약 이메일용 JSON)
@@ -830,6 +847,7 @@ def _main(market: str = 'ALL', scan_date: str | None = None):
         'gate_note': gate_note,
         'regime_note': regime,
         'coaching': coaching,
+        'position_tracking': tracking,
         'portfolio': portfolio,
         'quiet_accumulation': quiet,
         'results': [{

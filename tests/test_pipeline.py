@@ -23,6 +23,9 @@ class Pipeline(unittest.TestCase):
                  patch.object(daily_scan,'run_scan',return_value=([],False,FetchLog(),[])) as scan, \
                  patch.object(quiet_tracker,'save_quiet'), patch.object(quiet_tracker,'evaluate'), \
                  patch.object(tracker,'evaluate'), patch.object(tracker,'save_predictions'), \
+                 patch.object(daily_scan.position_monitor,'run',return_value={
+                     'holdings':[],'holdings_note':'보유 종목 미등록','recommendations_open':[],
+                     'recently_closed':[],'closed_stats':None,'failed':[]}) as monitor, \
                  patch.object(daily_scan,'send_report') as send:
                 daily_scan.main()
                 daily_scan.main()
@@ -31,6 +34,9 @@ class Pipeline(unittest.TestCase):
                 report=json.loads((Path(d)/'2026-10-26_scan.json').read_text())
                 self.assertEqual(report['results'],[])
                 self.assertEqual(report['entry_basis'],'next_session_open')
+                self.assertEqual(monitor.call_count,1)
+                self.assertEqual(report['position_tracking']['recommendations_open'],[])
+                self.assertIn('보유·추천 종목 점검',(Path(d)/'2026-10-26_scan.txt').read_text())
     def test_calibration_training_smoke_and_abstention(self):
         dates=session_dates('2022-01-03','2025-12-31')
         rng=np.random.default_rng(42)
